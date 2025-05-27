@@ -43,19 +43,28 @@ def build_qnode(n_qubits, q_depth, max_layers, dev):
 # -------------------------------
 
 class Quantumnet(nn.Module):
-    def __init__(self, n_qubits, q_depth, max_layers, q_delta, dev, n_classes=2):
+    def __init__(self, n_qubits, q_depth, max_layers, q_delta, dev, n_classes=2, base_model='resnet18'):
         super().__init__()
         self.n_qubits = n_qubits
         self.q_depth = q_depth
         self.max_layers = max_layers
         self.q_net = build_qnode(n_qubits, q_depth, max_layers, dev)
 
-        self.pre_net = nn.Linear(512, n_qubits)
+        if base_model == 'resnet18':
+            self.reduction = nn.Linear(512, n_qubits)
+        elif base_model == 'vgg16':
+            self.reduction = nn.Sequential(
+                nn.Linear(4096, 512),
+                nn.ReLU(),
+                nn.Linear(512, n_qubits)
+            )
+        # self.pre_net = nn.Linear(4096, n_qubits)
         self.q_params = nn.Parameter(q_delta * torch.randn(max_layers * n_qubits))
         self.post_net = nn.Linear(n_qubits, n_classes)
 
     def forward(self, input_features):
-        pre_out = self.pre_net(input_features)
+        # pre_out = self.pre_net(input_features)
+        pre_out = self.reduction(input_features)
         q_in = torch.tanh(pre_out) * np.pi / 2.0
 
         q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
