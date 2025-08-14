@@ -13,6 +13,8 @@ def train_model(model, dataloaders, dataset_sizes, device,
                 writer=None):
     """
     Entrena un modelo PyTorch e integra logs en TensorBoard si `writer` está definido.
+
+    Nota: El orden de los datos en validación se respeta según el DataLoader provisto.
     """
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -97,6 +99,9 @@ def train_model1(model, dataloaders, dataset_sizes, device,
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
     best_loss = float("inf")
+    # Evitar NameError manteniendo métricas de train si se desean usar en el futuro
+    best_acc_train = 0.0
+    best_loss_train = float("inf")
 
     print('🚀 Training started:')
 
@@ -226,11 +231,20 @@ def load_model(model, quantum: bool, name: str, models_dir="models"):
     Devuelve:
     - model con pesos cargados (o error si no existe el archivo)
     """
+    # Intentar compatibilidad con los dos esquemas de nombres usados en el repo
+    # 1) "q_"/"c_" como prefijo
+    prefix = "q" if quantum else "c"
+    path_pref = os.path.join(models_dir, f"{prefix}_{name}.pt")
+    # 2) sufijos "_quantum"/"_classical"
     suffix = "quantum" if quantum else "classical"
-    path = os.path.join(models_dir, f"{name}_{suffix}.pt")
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"❌ No se encontró el modelo en: {path}")
+    path_suf = os.path.join(models_dir, f"{name}_{suffix}.pt")
 
-    model.load_state_dict(torch.load(path))
+    candidate_paths = [path_pref, path_suf]
+    path = next((p for p in candidate_paths if os.path.isfile(p)), None)
+    if path is None:
+        raise FileNotFoundError(f"❌ No se encontró el modelo. Probados: {candidate_paths}")
+
+    state_dict = torch.load(path, map_location="cpu")
+    model.load_state_dict(state_dict)
     print(f"✅ Modelo cargado desde: {path}")
     return model

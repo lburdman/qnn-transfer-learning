@@ -18,9 +18,9 @@ class SpecAugment:
 
         # Valor negro por defecto tras normalización ImageNet para RGB
         if fill_value is None:
-            self.fill_value = torch.tensor([[-2.118], [-2.036], [-1.804]])  # R, G, B
+            self.fill_value = torch.tensor([-2.118, -2.036, -1.804])  # R, G, B como vector 1D
         else:
-            self.fill_value = fill_value  # tensor shape: [C, 1] o [C, 1, 1]
+            self.fill_value = fill_value  # tensor o escalar; se adapta en __call__
 
     def __call__(self, spec):
         """
@@ -28,16 +28,31 @@ class SpecAugment:
         """
         c, h, w = spec.shape
 
+        # Preparar tensor de relleno con broadcasting seguro [C, 1, 1]
+        fill_value = self.fill_value
+        if not isinstance(fill_value, torch.Tensor):
+            fill_value = torch.as_tensor(fill_value)
+        fill_value = fill_value.to(device=spec.device, dtype=spec.dtype)
+        if fill_value.dim() == 0 or fill_value.numel() == 1:
+            fill_tensor = fill_value.view(1, 1, 1).expand(c, 1, 1)
+        elif fill_value.numel() == c:
+            fill_tensor = fill_value.view(c, 1, 1)
+        else:
+            # Si el tamaño no coincide, usar media como fallback seguro
+            fill_tensor = fill_value.mean().view(1, 1, 1).expand(c, 1, 1)
+
         for _ in range(self.num_masks):
             # 🎯 Masking en tiempo (columnas negras)
             t = random.randint(0, self.time_mask_param)
             t0 = random.randint(0, max(1, w - t))
-            spec[:, :, t0:t0 + t] = self.fill_value if c == 1 else self.fill_value[:, None]
+            if t > 0:
+                spec[:, :, t0:t0 + t] = fill_tensor
 
             # 🎯 Masking en frecuencia (filas negras)
             f = random.randint(0, self.freq_mask_param)
             f0 = random.randint(0, max(1, h - f))
-            spec[:, f0:f0 + f, :] = self.fill_value if c == 1 else self.fill_value[:, None]
+            if f > 0:
+                spec[:, f0:f0 + f, :] = fill_tensor
 
         return spec
 
@@ -56,7 +71,7 @@ def get_data_transforms(spec_augment: bool = False):
         transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406],
-                             [0.229, 0.224, 0.225])
+                              [0.229, 0.224, 0.225])
     ]
 
     if spec_augment:
@@ -90,12 +105,16 @@ def get_dataloaders(data_dir, batch_size=4, shuffle=True, num_workers=0, spec_au
         for x in ['train', 'val']
     }
 
+    # TODO: Exponer 'prefetch_factor' y 'persistent_workers' como parámetros cuando num_workers > 0
+    #       para tunear I/O según hardware y tamaño de batch.
     dataloaders = {
         x: torch.utils.data.DataLoader(
             image_datasets[x],
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=num_workers
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=(num_workers > 0)
         )
         for x in ['train', 'val']
     }

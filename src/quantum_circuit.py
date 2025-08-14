@@ -8,14 +8,17 @@ import torch.nn as nn
 # -------------------------------
 
 def H_layer(nqubits):
+    """Aplica Hadamard a todos los qubits."""
     for idx in range(nqubits):
         qml.Hadamard(wires=idx)
 
 def RY_layer(w):
+    """Rota cada qubit alrededor de Y usando un vector de ángulos w."""
     for idx, element in enumerate(w):
         qml.RY(element, wires=idx)
 
 def entangling_layer(nqubits):
+    """Crea entrelazamiento alternado en anillos pares e impares."""
     for i in range(0, nqubits - 1, 2):
         qml.CNOT(wires=[i, i + 1])
     for i in range(1, nqubits - 1, 2):
@@ -63,15 +66,20 @@ class Quantumnet(nn.Module):
         self.post_net = nn.Linear(n_qubits, n_classes)
 
     def forward(self, input_features):
+        """Proyección a n_qubits, ejecución del QNode por elemento y clasificación clásica final.
+        Nota: PennyLane no vectoriza este QNode; por eso se itera por elemento.
+        """
         # pre_out = self.pre_net(input_features)
         pre_out = self.reduction(input_features)
         q_in = torch.tanh(pre_out) * np.pi / 2.0
 
-        q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
+        batch_size = q_in.shape[0]
+        # Preasignación para evitar concatenaciones O(n^2)
+        q_out = torch.empty((batch_size, self.n_qubits), device=input_features.device, dtype=torch.float32)
 
-        for elem in q_in:
-            q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float().unsqueeze(0)
-            q_out = torch.cat((q_out, q_out_elem))
+        for i, elem in enumerate(q_in):
+            q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float()
+            q_out[i] = q_out_elem
 
         return self.post_net(q_out)
 

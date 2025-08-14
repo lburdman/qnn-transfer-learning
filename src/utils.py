@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from tensorboard.backend.event_processing import event_accumulator
+
 
 def imshow(inp, title=None):
     """
@@ -28,6 +28,7 @@ def imshow(inp, title=None):
     plt.imshow(inp)
     if title is not None:
         plt.title(title)
+
 
 def plot_tensorboard_metric(run_name: str, metric: str, phase: str, runs_dir="runs"):
     """
