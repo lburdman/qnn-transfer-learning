@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Organizador de Eventos · 4 Semanas</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Organizador de Eventos</h1>
+      <div class="timezone">Zona horaria: <strong>America/Argentina/Buenos_Aires</strong></div>
+    </header>
+
+    <div id="app" class="layout">
+      <!-- Panel Izquierdo -->
+      <aside id="left-panel" class="left-panel" aria-label="Panel de datos">
+        <section class="filters" aria-labelledby="filters-title">
+          <div class="section-title-row">
+            <h2 id="filters-title">Filtros</h2>
+            <div class="filters-actions">
+              <button id="resetFiltersBtn" type="button" class="btn btn-secondary" aria-label="Resetear filtros">Reset</button>
+            </div>
+          </div>
+          <div class="filters-grid">
+            <label for="filterSpeaker">Speaker</label>
+            <select id="filterSpeaker" aria-label="Filtrar por speaker">
+              <option value="">Todos</option>
+            </select>
+
+            <label for="filterTematica">Temática</label>
+            <input id="filterTematica" type="text" placeholder="Buscar temática" aria-label="Filtrar por temática" />
+
+            <label for="filterNivel">Nivel</label>
+            <select id="filterNivel" aria-label="Filtrar por nivel">
+              <option value="">Todos</option>
+              <option value="Bajo">Bajo</option>
+              <option value="Intermedio">Intermedio</option>
+              <option value="Alto">Alto</option>
+            </select>
+          </div>
+        </section>
+
+        <section class="speakers" aria-labelledby="speakers-title">
+          <div class="section-title-row">
+            <h2 id="speakers-title">Speakers</h2>
+            <div class="inline-actions">
+              <button id="exportJsonBtn" class="btn btn-secondary" type="button">Exportar JSON</button>
+              <input id="importJsonFile" type="file" accept="application/json" hidden />
+              <button id="importJsonBtn" class="btn btn-secondary" type="button">Importar JSON</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table id="speakersTable" aria-describedby="speakers-help">
+              <caption id="speakers-help" class="sr-only">Tabla ordenable por columnas</caption>
+              <thead>
+                <tr>
+                  <th data-sort-key="nombre" role="columnheader" aria-sort="none" tabindex="0">Nombre</th>
+                  <th data-sort-key="tematica" role="columnheader" aria-sort="none" tabindex="0">Temática</th>
+                  <th role="columnheader">Bio</th>
+                </tr>
+              </thead>
+              <tbody id="speakersTableBody">
+                <!-- filas speakers -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="form-section" aria-labelledby="new-speaker-title">
+          <h3 id="new-speaker-title">Nuevo Speaker</h3>
+          <form id="formSpeaker" novalidate>
+            <div class="form-grid">
+              <label for="spkNombre">Nombre *</label>
+              <input id="spkNombre" name="nombre" type="text" required />
+
+              <label for="spkTematica">Temática</label>
+              <input id="spkTematica" name="tematica" type="text" />
+
+              <label for="spkBio">Bio corta</label>
+              <textarea id="spkBio" name="bio" rows="2" maxlength="280"></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Agregar speaker</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="form-section" aria-labelledby="new-event-title">
+          <h3 id="new-event-title">Nueva Charla / Evento</h3>
+          <form id="formEvent" novalidate>
+            <div class="form-grid">
+              <label for="evtFecha">Fecha *</label>
+              <input id="evtFecha" name="fecha" type="date" required />
+
+              <label for="evtFranja">Franja *</label>
+              <select id="evtFranja" name="franja" required>
+                <option value="Mañana">Mañana</option>
+                <option value="Tarde">Tarde</option>
+                <option value="Noche">Noche</option>
+              </select>
+
+              <label for="evtSpeakers">Speaker(s) *</label>
+              <select id="evtSpeakers" name="speakers" multiple size="4" aria-describedby="evtSpeakersHelp" required></select>
+              <div id="evtSpeakersHelp" class="help">Sostén Ctrl/Cmd para selección múltiple.</div>
+
+              <label for="evtTematica">Temática</label>
+              <input id="evtTematica" name="tematica" type="text" />
+
+              <label for="evtDescripcion">Descripción</label>
+              <textarea id="evtDescripcion" name="descripcion" rows="3" maxlength="200"></textarea>
+              <div class="char-counter" id="evtDescCounter">0/200</div>
+
+              <label for="evtNivel">Nivel</label>
+              <select id="evtNivel" name="nivel">
+                <option value="Bajo">Bajo</option>
+                <option value="Intermedio" selected>Intermedio</option>
+                <option value="Alto">Alto</option>
+              </select>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Crear evento</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="events-list" aria-labelledby="events-title">
+          <h2 id="events-title">Lista de Eventos</h2>
+          <div class="table-wrapper">
+            <table id="eventsTable">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Franja</th>
+                  <th>Speaker(s)</th>
+                  <th>Temática</th>
+                  <th>Nivel</th>
+                  <th>Descripción</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="eventsTableBody"><!-- filas eventos --></tbody>
+            </table>
+          </div>
+        </section>
+      </aside>
+
+      <!-- Panel Derecho / Calendario -->
+      <main id="calendar-panel" class="calendar-panel" aria-label="Calendario de 4 semanas">
+        <div class="calendar-controls">
+          <div class="date-control">
+            <label for="startDate">Fecha de inicio</label>
+            <input id="startDate" type="date" />
+          </div>
+          <div class="nav-buttons">
+            <button id="prevBtn" class="btn btn-secondary" aria-label="Ver 4 semanas anteriores">Anterior</button>
+            <button id="nextBtn" class="btn btn-secondary" aria-label="Ver 4 semanas siguientes">Siguiente</button>
+          </div>
+        </div>
+        <div id="calendarGrid" class="calendar-grid" aria-live="polite"><!-- grilla --></div>
+      </main>
+    </div>
+
+    <!-- Modal de Edición -->
+    <div id="modalBackdrop" class="modal-backdrop" hidden></div>
+    <div id="eventModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+      <div class="modal-content" role="document">
+        <div class="modal-header">
+          <h3 id="modalTitle">Editar evento</h3>
+          <button id="modalCloseBtn" class="icon-btn" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="modal-body">
+          <form id="formEditEvent" novalidate>
+            <input type="hidden" id="editEvtId" />
+            <div class="form-grid">
+              <label for="editEvtFecha">Fecha *</label>
+              <input id="editEvtFecha" name="fecha" type="date" required />
+
+              <label for="editEvtFranja">Franja *</label>
+              <select id="editEvtFranja" name="franja" required>
+                <option value="Mañana">Mañana</option>
+                <option value="Tarde">Tarde</option>
+                <option value="Noche">Noche</option>
+              </select>
+
+              <label for="editEvtSpeakers">Speaker(s) *</label>
+              <select id="editEvtSpeakers" name="speakers" multiple size="4" required></select>
+
+              <label for="editEvtTematica">Temática</label>
+              <input id="editEvtTematica" name="tematica" type="text" />
+
+              <label for="editEvtDescripcion">Descripción</label>
+              <textarea id="editEvtDescripcion" name="descripcion" rows="3" maxlength="200"></textarea>
+              <div class="char-counter" id="editEvtDescCounter">0/200</div>
+
+              <label for="editEvtNivel">Nivel</label>
+              <select id="editEvtNivel" name="nivel">
+                <option value="Bajo">Bajo</option>
+                <option value="Intermedio">Intermedio</option>
+                <option value="Alto">Alto</option>
+              </select>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn">Guardar</button>
+              <button id="modalCancelBtn" type="button" class="btn btn-secondary">Cancelar</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toasts accesibles -->
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
