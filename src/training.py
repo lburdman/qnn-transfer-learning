@@ -7,8 +7,9 @@ import matplotlib.pyplot as plt
 from utils import imshow  # función para mostrar imágenes normalizadas
 
 # -----------------------------------------
-# 🏋️ Función de entrenamiento principal
+# 🏋️ Función de entrenamiento principal (comentada a petición del usuario)
 # -----------------------------------------
+"""
 def train_model(model, dataloaders, dataset_sizes, device,
                 criterion, optimizer, scheduler, num_epochs,
                 writer=None):
@@ -74,6 +75,7 @@ def train_model(model, dataloaders, dataset_sizes, device,
 
     model.load_state_dict(best_model_wts)
     return model
+"""
 
 
 def train_model1(model, dataloaders, dataset_sizes, device,
@@ -117,7 +119,7 @@ def train_model1(model, dataloaders, dataset_sizes, device,
             running_loss = 0.0
             running_corrects = 0
 
-            n_batches = dataset_sizes[phase] // dataloaders[phase].batch_size
+            n_batches = len(dataloaders[phase])
 
             for it, (inputs, labels) in enumerate(dataloaders[phase]):
                 since_batch = time.time()
