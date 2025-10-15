@@ -9,73 +9,72 @@ from utils import imshow  # función para mostrar imágenes normalizadas
 # -----------------------------------------
 # 🏋️ Función de entrenamiento principal (comentada a petición del usuario)
 # -----------------------------------------
-"""
-def train_model(model, dataloaders, dataset_sizes, device,
-                criterion, optimizer, scheduler, num_epochs,
-                writer=None):
-    """
-    Entrena un modelo PyTorch e integra logs en TensorBoard si `writer` está definido.
-    """
-    since = time.time()
-    best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
-    best_loss = float('inf')
 
-    print('🚀 Training started:')
+# def train_model(model, dataloaders, dataset_sizes, device,
+#                 criterion, optimizer, scheduler, num_epochs,
+#                 writer=None):
+#     """
+#     Entrena un modelo PyTorch e integra logs en TensorBoard si `writer` está definido.
+#     """
+#     since = time.time()
+#     best_model_wts = copy.deepcopy(model.state_dict())
+#     best_acc = 0.0
+#     best_loss = float('inf')
 
-    for epoch in range(num_epochs):
-        for phase in ['train', 'val']:
-            model.train() if phase == 'train' else model.eval()
-            running_loss = 0.0
-            running_corrects = 0
-            n_batches = dataset_sizes[phase] // dataloaders[phase].batch_size
+#     print('🚀 Training started:')
 
-            for it, (inputs, labels) in enumerate(dataloaders[phase]):
-                since_batch = time.time()
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                optimizer.zero_grad()
+#     for epoch in range(num_epochs):
+#         for phase in ['train', 'val']:
+#             model.train() if phase == 'train' else model.eval()
+#             running_loss = 0.0
+#             running_corrects = 0
+#             n_batches = dataset_sizes[phase] // dataloaders[phase].batch_size
 
-                with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    _, preds = torch.max(outputs, 1)
-                    loss = criterion(outputs, labels)
+#             for it, (inputs, labels) in enumerate(dataloaders[phase]):
+#                 since_batch = time.time()
+#                 inputs = inputs.to(device)
+#                 labels = labels.to(device)
+#                 optimizer.zero_grad()
 
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+#                 with torch.set_grad_enabled(phase == 'train'):
+#                     outputs = model(inputs)
+#                     _, preds = torch.max(outputs, 1)
+#                     loss = criterion(outputs, labels)
 
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data).item()
+#                     if phase == 'train':
+#                         loss.backward()
+#                         optimizer.step()
 
-                print('Phase: {} Epoch: {}/{} Iter: {}/{} Batch time: {:.4f}s'.format(
-                    phase, epoch + 1, num_epochs, it + 1, n_batches + 1, time.time() - since_batch),
-                    end='\r', flush=True)
+#                 running_loss += loss.item() * inputs.size(0)
+#                 running_corrects += torch.sum(preds == labels.data).item()
 
-            epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects / dataset_sizes[phase]
-            print('Phase: {} Epoch: {}/{} Loss: {:.4f} Acc: {:.4f}'.format(
-                phase, epoch + 1, num_epochs, epoch_loss, epoch_acc))
+#                 print('Phase: {} Epoch: {}/{} Iter: {}/{} Batch time: {:.4f}s'.format(
+#                     phase, epoch + 1, num_epochs, it + 1, n_batches + 1, time.time() - since_batch),
+#                     end='\r', flush=True)
 
-            # 👉 Log en TensorBoard
-            if writer:
-                writer.add_scalar(f'{phase}/Loss', epoch_loss, epoch)
-                writer.add_scalar(f'{phase}/Accuracy', epoch_acc, epoch)
+#             epoch_loss = running_loss / dataset_sizes[phase]
+#             epoch_acc = running_corrects / dataset_sizes[phase]
+#             print('Phase: {} Epoch: {}/{} Loss: {:.4f} Acc: {:.4f}'.format(
+#                 phase, epoch + 1, num_epochs, epoch_loss, epoch_acc))
 
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
-                best_loss = epoch_loss
-                best_model_wts = copy.deepcopy(model.state_dict())
+#             # 👉 Log en TensorBoard
+#             if writer:
+#                 writer.add_scalar(f'{phase}/Loss', epoch_loss, epoch)
+#                 writer.add_scalar(f'{phase}/Accuracy', epoch_acc, epoch)
 
-        scheduler.step()
+#             if phase == 'val' and epoch_acc > best_acc:
+#                 best_acc = epoch_acc
+#                 best_loss = epoch_loss
+#                 best_model_wts = copy.deepcopy(model.state_dict())
 
-    time_elapsed = time.time() - since
-    print('✅ Entrenamiento finalizado en {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('🎯 Mejor loss (val): {:.4f} | Mejor accuracy (val): {:.4f}'.format(best_loss, best_acc))
+#         scheduler.step()
 
-    model.load_state_dict(best_model_wts)
-    return model
-"""
+#     time_elapsed = time.time() - since
+#     print('✅ Entrenamiento finalizado en {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+#     print('🎯 Mejor loss (val): {:.4f} | Mejor accuracy (val): {:.4f}'.format(best_loss, best_acc))
+
+#     model.load_state_dict(best_model_wts)
+#     return model
 
 
 def train_model1(model, dataloaders, dataset_sizes, device,
