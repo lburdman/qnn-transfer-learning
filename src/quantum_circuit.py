@@ -51,9 +51,9 @@ class Quantumnet(nn.Module):
         self.q_net = build_qnode(n_qubits, q_depth, max_layers, dev)
 
         if base_model == 'resnet18':
-            self.reduction = nn.Linear(512, n_qubits)
+            self.pre_net = nn.Linear(512, n_qubits)
         elif base_model == 'vgg16':
-            self.reduction = nn.Sequential(
+            self.pre_net = nn.Sequential(
                 nn.Linear(4096, 512),
                 nn.ReLU(),
                 nn.Linear(512, n_qubits)
@@ -64,7 +64,7 @@ class Quantumnet(nn.Module):
 
     def forward(self, input_features):
         # pre_out = self.pre_net(input_features)
-        pre_out = self.reduction(input_features)
+        pre_out = self.pre_net(input_features)
         q_in = torch.tanh(pre_out) * np.pi / 2.0
 
         q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
@@ -74,6 +74,90 @@ class Quantumnet(nn.Module):
             q_out = torch.cat((q_out, q_out_elem))
 
         return self.post_net(q_out)
+    
+
+# ----------------------------------
+# Capas del nuevo circuito cuántico
+# ----------------------------------
+
+def zz_feature_map(x, nqubits, reps=2):
+    for _ in range(reps):
+        for i in range(nqubits):
+            qml.Hadamard(wires=i)
+            qml.PhaseShift(2 * x[i], wires=i)
+        for i in range(nqubits - 1):
+            qml.CNOT(wires=[i, i + 1])
+            qml.PhaseShift(2 * (np.pi - x[i]) * (np.pi - x[i + 1]), wires=i + 1)
+
+def real_amplitudes_block(weights, nqubits):
+    for i in range(nqubits):
+        qml.RY(weights[i], wires=i)
+    for i in range(nqubits - 1):
+        qml.CNOT(wires=[i, i + 1])
+
+# ----------------------------------
+# Nuevo constructor de QNode
+# ----------------------------------
+
+def build_qnode2(n_qubits, q_depth, max_layers, dev):
+    """
+    Construye un QNode con:
+    - ZZFeatureMap repetido dos veces (fijo)
+    - q_depth repeticiones de RealAmplitudes (RY + CNOT)
+    """
+    @qml.qnode(dev, interface='torch')
+    def q_net(q_in, q_weights_flat):
+        # Redimensionar parámetros: (max_layers, n_qubits)
+        q_weights = q_weights_flat.reshape(max_layers, n_qubits)
+
+        # Feature map fijo
+        zz_feature_map(q_in, n_qubits, reps=2)
+
+        # RealAmplitudes con q_depth repeticiones
+        for l in range(q_depth):
+            real_amplitudes_block(q_weights[l], n_qubits)
+
+        return [qml.expval(qml.PauliZ(j)) for j in range(n_qubits)]
+
+    return q_net
+
+
+# ----------------------------------
+# Nueva clase DressedQuantumCircuit
+# ----------------------------------
+
+class DressedQuantumCircuit(nn.Module):
+    def __init__(self, n_qubits, q_depth, max_layers, q_delta, dev, n_classes=2, base_model='resnet18'):
+        super().__init__()
+        self.n_qubits = n_qubits
+        self.q_depth = q_depth
+        self.max_layers = max_layers
+        self.q_net = build_qnode2(n_qubits, q_depth, max_layers, dev)
+
+        if base_model == 'resnet18':
+            self.pre_net = nn.Linear(512, n_qubits)
+        elif base_model == 'vgg16':
+            self.pre_net = nn.Sequential(
+                nn.Linear(4096, 512),
+                nn.ReLU(),
+                nn.Linear(512, n_qubits)
+            )
+
+        self.q_params = nn.Parameter(q_delta * torch.randn(max_layers * n_qubits))
+        self.post_net = nn.Linear(n_qubits, n_classes)
+
+    def forward(self, input_features):
+        pre_out = self.pre_net(input_features)
+        q_in = torch.tanh(pre_out) * np.pi / 2.0
+
+        q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
+
+        for elem in q_in:
+            q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float().unsqueeze(0)
+            q_out = torch.cat((q_out, q_out_elem))
+
+        return self.post_net(q_out)
+
 
 
 if __name__ == "__main__":

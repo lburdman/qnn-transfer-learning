@@ -2,6 +2,7 @@ import time
 import copy
 import torch
 import os
+import json
 import matplotlib.pyplot as plt
 from utils import imshow  # función para mostrar imágenes normalizadas
 
@@ -76,7 +77,7 @@ def train_model(model, dataloaders, dataset_sizes, device,
 
 
 def train_model1(model, dataloaders, dataset_sizes, device,
-                criterion, optimizer, scheduler, num_epochs):
+                criterion, optimizer, scheduler, num_epochs, save_metrics=True, metrics_dir="runs_updated"):
     """
     Entrena un modelo PyTorch usando entrenamiento supervisado.
     
@@ -89,6 +90,8 @@ def train_model1(model, dataloaders, dataset_sizes, device,
     - optimizer: optimizador de PyTorch
     - scheduler: scheduler de learning rate
     - num_epochs: cantidad total de épocas
+    - save_metrics: si guardar métricas en JSON
+    - metrics_dir: directorio donde guardar métricas
 
     Devuelve:
     - model: modelo con los mejores pesos validados
@@ -96,7 +99,15 @@ def train_model1(model, dataloaders, dataset_sizes, device,
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
+    best_acc_train = 0.0
+    best_loss_train = float("inf")
     best_loss = float("inf")
+
+    # Listas para almacenar métricas
+    train_losses = []
+    train_accs = []
+    val_losses = []
+    val_accs = []
 
     print('🚀 Training started:')
 
@@ -135,6 +146,14 @@ def train_model1(model, dataloaders, dataset_sizes, device,
             print('Phase: {}    Epoch: {}/{}    Loss: {:.4f}    Acc: {:.4f}        '.format(
                 phase, epoch + 1, num_epochs, epoch_loss, epoch_acc))
 
+            # Guardar métricas
+            if phase == 'train':
+                train_losses.append(epoch_loss)
+                train_accs.append(epoch_acc)
+            else:
+                val_losses.append(epoch_loss)
+                val_accs.append(epoch_acc)
+
             # Actualizar mejores pesos según validación
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
@@ -154,6 +173,30 @@ def train_model1(model, dataloaders, dataset_sizes, device,
         time_elapsed // 60, time_elapsed % 60))
     print('Mejor loss (val): {:.4f} | Mejor accuracy (val): {:.4f}'.format(
         best_loss, best_acc))
+
+    # Guardar métricas en JSON si se solicita
+    if save_metrics:
+        timestamp = time.strftime('%d%m_%H%M')  # Formato: día-mes_hora-minuto
+        metrics_data = {
+            "train_losses": train_losses,
+            "train_accs": train_accs,
+            "val_losses": val_losses,
+            "val_accs": val_accs,
+            "timestamp": timestamp,
+            "best_val_loss": best_loss,
+            "best_val_acc": best_acc,
+            "best_train_loss": best_loss_train,
+            "best_train_acc": best_acc_train,
+            "num_epochs": num_epochs
+        }
+        
+        os.makedirs(metrics_dir, exist_ok=True)
+        metrics_file = os.path.join(metrics_dir, f"training_metrics_{timestamp}.json")
+        
+        with open(metrics_file, 'w') as f:
+            json.dump(metrics_data, f, indent=4)
+        
+        print(f"📊 Métricas guardadas en: {metrics_file}")
 
     model.load_state_dict(best_model_wts)
     return model

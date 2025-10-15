@@ -1,0 +1,19 @@
+name: pennylane-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy=1.24.4
+  - scipy
+  - matplotlib
+  - pandas
+  - seaborn
+  - scikit-learn
+  - ipykernel
+  - jupyter
+  - pip
+  - pip:
+      - pennylane==0.41.1
+      - qiskit==1.4.3
+      - tqdm
+      - librosa

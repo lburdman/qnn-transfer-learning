@@ -1,4 +1,16 @@
 HCQNN/
 CremaD/
 runs/
+runs_updated/
 models/
+MNIST/
+cancer_pablo/
+cancer/
+__pycache__/
+MyEstimatorQNN.py
+MyTorchConnector.py
+*.idx1-ubyte
+*.idx3-ubyte
+*.pdf
+cursor/
+*.zip

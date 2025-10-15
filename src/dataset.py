@@ -2,6 +2,9 @@ import os
 from torchvision import datasets, transforms
 import torch
 import random
+from collections import Counter
+from torch.utils.data import DataLoader
+
 
 # SpecAugment
 class SpecAugment:
@@ -104,3 +107,77 @@ def get_dataloaders(data_dir, batch_size=4, shuffle=True, num_workers=0, spec_au
     class_names = image_datasets['train'].classes
 
     return dataloaders, dataset_sizes, class_names
+
+
+def create_dataloaders(data_dir,
+                       batch_size=8,
+                       shuffle=True,
+                       num_workers=4,
+                       grayscale=False):
+    """
+    Creates dataloaders for RGB or grayscale images.
+
+    Args:
+        data_dir (str): root dir with 'train' and 'val' subfolders
+        batch_size (int): samples per batch
+        shuffle (bool): shuffle training set
+        num_workers (int): DataLoader subprocesses
+        grayscale (bool): if True, convert images to 1-channel
+
+    Returns:
+        dataloaders (dict): {'train': DataLoader, 'val': DataLoader}
+        dataset_sizes (dict): {'train': int, 'val': int}
+        class_names (list): labels
+    """
+    # Normalization stats
+    if grayscale:
+        mean, std = [0.5], [0.5]
+    else:
+        mean = [0.485, 0.456, 0.406]
+        std  = [0.229, 0.224, 0.225]
+
+    # Build transform pipeline
+    transform_list = [transforms.Resize((224, 224))]
+    if grayscale:
+        transform_list.append(transforms.Grayscale(num_output_channels=1))
+    transform_list += [
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ]
+    data_transform = transforms.Compose(transform_list)
+
+    # Create datasets
+    image_datasets = {
+        phase: datasets.ImageFolder(os.path.join(data_dir, phase),
+                                   transform=data_transform)
+        for phase in ['train', 'val']
+    }
+
+    # Create dataloaders
+    dataloaders = {
+        phase: DataLoader(image_datasets[phase],
+                          batch_size=batch_size,
+                          shuffle=(shuffle if phase=='train' else False),
+                          num_workers=num_workers)
+        for phase in ['train', 'val']
+    }
+
+    # Sizes and class names
+    dataset_sizes = {phase: len(image_datasets[phase]) for phase in ['train', 'val']}
+    class_names   = image_datasets['train'].classes
+
+    return dataloaders, dataset_sizes, class_names
+
+def count_images_per_class_from_dataset(dataset, class_names):
+    """
+    Counts images per class using dataset.targets.
+
+    Args:
+        dataset (torchvision.datasets.ImageFolder)
+        class_names (list): labels
+
+    Returns:
+        dict: {class_name: count}
+    """
+    counts = Counter(dataset.targets)
+    return {class_names[i]: counts[i] for i in range(len(class_names))}
