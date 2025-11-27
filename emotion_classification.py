@@ -10,9 +10,9 @@ import time
 import copy
 import sys
 sys.path.append('src')
-from dataset import get_dataloaders
-from utils import imshow
-from quantum_circuit import Quantumnet
+from src.dataset import get_dataloaders
+from src.utils import imshow
+from src.quantum_circuit import Quantumnet
 from torch.utils.tensorboard import SummaryWriter
 
 # Función de entrenamiento
