@@ -76,7 +76,7 @@ def train_model(model: nn.Module, dataloaders: Dict[str, torch.utils.data.DataLo
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
             history[f"{phase}_loss"].append(epoch_loss)
             history[f"{phase}_acc"].append(epoch_acc.item())
-            print(f"{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}")
+            print(f"{phase} Loss: {epoch_loss:.4f}  Acc: {epoch_acc:.4f}")
             if phase == "test" and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = model.state_dict()
@@ -134,7 +134,7 @@ def evaluate_model(model: nn.Module, dataloader, class_names, device, model_dir:
     with open(metrics_path, "w", encoding="utf-8") as handle:
         json.dump(metrics, handle, indent=4)
     print(f"{split_name.upper()} metrics saved to {metrics_path}")
-    print(f"{split_name.UPPER()} Accuracy: {acc:.4f} | F1: {f1:.4f}")
+    print(f"{split_name.upper()} Accuracy: {acc:.4f} | F1: {f1:.4f}")
 
     fig, ax = plt.subplots(figsize=(6, 6))
     im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
