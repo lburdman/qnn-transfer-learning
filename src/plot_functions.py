@@ -69,7 +69,7 @@ def plot_training_metrics(json_path: str, metrics: str = "both", figsize: Sequen
     """
     data = load_training_data(json_path)
     model_name = get_model_name_from_path(json_path)
-    epochs = range(1, len(data["train_losses"]) + 1)
+    epochs = range(1, len(data.get("train_losses", [])) + 1)
 
     if metrics == "both":
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
@@ -78,25 +78,31 @@ def plot_training_metrics(json_path: str, metrics: str = "both", figsize: Sequen
         fig, ax = plt.subplots(1, 1, figsize=(figsize[0] // 2, figsize[1]))
         axes = [ax]
 
-    if metrics in ["loss", "both"]:
+    # Handle optional keys gracefully
+    train_losses = data.get("train_losses") or data.get("loss_train")
+    val_losses = data.get("val_losses") or data.get("validation_losses") or data.get("loss_val")
+    train_accs = data.get("train_accs") or data.get("acc_train")
+    val_accs = data.get("val_accs") or data.get("validation_accs") or data.get("acc_val")
+
+    if metrics in ["loss", "both"] and train_losses and val_losses:
         ax = axes[0]
-        ax.plot(epochs, data["train_losses"], "b-", label="Training Loss", linewidth=2)
-        ax.plot(epochs, data["val_losses"], "r-", label="Validation Loss", linewidth=2)
+        ax.plot(epochs, train_losses, "b-", label="Training Loss", linewidth=2)
+        ax.plot(epochs, val_losses, "r-", label="Validation Loss", linewidth=2)
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Loss")
         ax.set_title(f"{model_name} - Training & Validation Loss")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.legend(frameon=False)
+        ax.grid(True, alpha=0.3, linestyle="--")
 
-    if metrics in ["accuracy", "both"]:
+    if metrics in ["accuracy", "both"] and train_accs and val_accs:
         ax = axes[1] if metrics == "both" else axes[0]
-        ax.plot(epochs, data["train_accs"], "b-", label="Training Accuracy", linewidth=2)
-        ax.plot(epochs, data["val_accs"], "r-", label="Validation Accuracy", linewidth=2)
+        ax.plot(epochs, train_accs, "b-", label="Training Accuracy", linewidth=2)
+        ax.plot(epochs, val_accs, "r-", label="Validation Accuracy", linewidth=2)
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Accuracy")
         ax.set_title(f"{model_name} - Training & Validation Accuracy")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.legend(frameon=False)
+        ax.grid(True, alpha=0.3, linestyle="--")
         ax.set_ylim(0, 1)
 
     plt.tight_layout()
@@ -105,8 +111,10 @@ def plot_training_metrics(json_path: str, metrics: str = "both", figsize: Sequen
         print(f"Figure saved to: {save_path}")
     plt.show()
     print(f"\nModel statistics for {model_name}:")
-    print(f"  Best Validation Loss: {min(data['val_losses']):.4f}")
-    print(f"  Best Validation Accuracy: {max(data['val_accs']):.4f}")
+    if val_losses:
+        print(f"  Best Validation Loss: {min(val_losses):.4f}")
+    if val_accs:
+        print(f"  Best Validation Accuracy: {max(val_accs):.4f}")
     print(f"  Epochs: {len(epochs)}")
 
 
@@ -133,7 +141,7 @@ def plot_multiple_models(json_paths: Iterable[str], metrics: str = "both", figsi
         models_data.append(data)
         model_names.append(get_model_name_from_path(json_path))
 
-    epochs = range(1, len(models_data[0]["train_losses"]) + 1)
+    epochs = range(1, len(models_data[0].get("train_losses", [])) + 1)
 
     if metrics == "both":
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
@@ -147,24 +155,32 @@ def plot_multiple_models(json_paths: Iterable[str], metrics: str = "both", figsi
     if metrics in ["loss", "both"]:
         ax = axes[0]
         for data, name, color in zip(models_data, model_names, colors):
-            ax.plot(epochs, data["train_losses"], "--", color=color, label=f"{name} (Train)", linewidth=2, alpha=0.7)
-            ax.plot(epochs, data["val_losses"], "-", color=color, label=f"{name} (Val)", linewidth=2)
+            train_losses = data.get("train_losses")
+            val_losses = data.get("val_losses") or data.get("test_losses")
+            if not train_losses or not val_losses:
+                continue
+            ax.plot(epochs, train_losses, "--", color=color, label=f"{name} (Train)", linewidth=2, alpha=0.7)
+            ax.plot(epochs, val_losses, "-", color=color, label=f"{name} (Val/Test)", linewidth=2)
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Loss")
         ax.set_title("Training & Validation Loss Comparison")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.legend(frameon=False)
+        ax.grid(True, alpha=0.3, linestyle="--")
 
     if metrics in ["accuracy", "both"]:
         ax = axes[1] if metrics == "both" else axes[0]
         for data, name, color in zip(models_data, model_names, colors):
-            ax.plot(epochs, data["train_accs"], "--", color=color, label=f"{name} (Train)", linewidth=2, alpha=0.7)
-            ax.plot(epochs, data["val_accs"], "-", color=color, label=f"{name} (Val)", linewidth=2)
+            train_accs = data.get("train_accs")
+            val_accs = data.get("val_accs") or data.get("test_accs")
+            if not train_accs or not val_accs:
+                continue
+            ax.plot(epochs, train_accs, "--", color=color, label=f"{name} (Train)", linewidth=2, alpha=0.7)
+            ax.plot(epochs, val_accs, "-", color=color, label=f"{name} (Val/Test)", linewidth=2)
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Accuracy")
         ax.set_title("Training & Validation Accuracy Comparison")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        ax.legend(frameon=False)
+        ax.grid(True, alpha=0.3, linestyle="--")
         ax.set_ylim(0, 1)
 
     plt.tight_layout()
@@ -177,8 +193,14 @@ def plot_multiple_models(json_paths: Iterable[str], metrics: str = "both", figsi
     print("=" * 60)
     for data, name in zip(models_data, model_names):
         print(f"\n{name}:")
-        print(f"  Best Validation Loss: {min(data['val_losses']):.4f}")
-        print(f"  Best Validation Accuracy: {max(data['val_accs']):.4f}")
+        if data.get("val_losses"):
+            print(f"  Best Validation Loss: {min(data['val_losses']):.4f}")
+        if data.get("test_losses"):
+            print(f"  Best Test Loss: {min(data['test_losses']):.4f}")
+        if data.get("val_accs"):
+            print(f"  Best Validation Accuracy: {max(data['val_accs']):.4f}")
+        if data.get("test_accs"):
+            print(f"  Best Test Accuracy: {max(data['test_accs']):.4f}")
         print(f"  Epochs: {len(epochs)}")
 
 
@@ -300,32 +322,44 @@ def plot_overlapped_metrics(json_path: str, figsize: Sequence[int] = (10, 6),
     """
     data = load_training_data(json_path)
     model_name = get_model_name_from_path(json_path)
-    epochs = range(1, len(data["train_losses"]) + 1)
+    epochs = range(1, len(data.get("train_losses", [])) + 1)
+
+    # Resolve primary and fallback metric names to stay robust across logs
+    train_losses = data.get("train_losses") or data.get("loss_train")
+    val_losses = data.get("val_losses") or data.get("validation_losses")
+    test_losses = data.get("test_losses")
+    train_accs = data.get("train_accs") or data.get("acc_train")
+    val_accs = data.get("val_accs") or data.get("validation_accs")
+    test_accs = data.get("test_accs")
 
     fig, ax1 = plt.subplots(figsize=figsize)
     color1 = "tab:red"
     ax1.set_xlabel("Epoch")
     ax1.set_ylabel("Loss", color=color1)
-    line1 = ax1.plot(epochs, data["train_losses"], "--", color=color1,
-                     label="Training Loss", linewidth=2, alpha=0.7)
-    line2 = ax1.plot(epochs, data.get("test_losses", data.get("val_losses", [])), "-",
-                     color=color1, label="Test Loss", linewidth=2)
+
+    lines = []
+    if train_losses:
+        lines += ax1.plot(epochs, train_losses, "--", color=color1, label="Training Loss", linewidth=2, alpha=0.7)
+    target_losses = test_losses or val_losses
+    if target_losses:
+        lines += ax1.plot(epochs, target_losses, "-", color=color1, label="Val/Test Loss", linewidth=2)
     ax1.tick_params(axis="y", labelcolor=color1)
-    ax1.grid(True, alpha=0.3)
+    ax1.grid(True, alpha=0.35, linestyle="--")
 
     ax2 = ax1.twinx()
     color2 = "tab:blue"
     ax2.set_ylabel("Accuracy", color=color2)
-    line3 = ax2.plot(epochs, data["train_accs"], "--", color=color2,
-                     label="Training Accuracy", linewidth=2, alpha=0.7)
-    line4 = ax2.plot(epochs, data.get("test_accs", data.get("val_accs", [])), "-",
-                     color=color2, label="Testing Accuracy", linewidth=2)
+    if train_accs:
+        lines += ax2.plot(epochs, train_accs, "--", color=color2, label="Training Accuracy", linewidth=2, alpha=0.7)
+    target_accs = test_accs or val_accs
+    if target_accs:
+        lines += ax2.plot(epochs, target_accs, "-", color=color2, label="Val/Test Accuracy", linewidth=2)
     ax2.tick_params(axis="y", labelcolor=color2)
     ax2.set_ylim(0, 1)
 
-    lines = line1 + line2 + line3 + line4
-    labels = [line.get_label() for line in lines]
-    ax1.legend(lines, labels, loc="center right")
+    if lines:
+        labels = [line.get_label() for line in lines]
+        ax1.legend(lines, labels, loc="upper right", frameon=False)
 
     plt.title(f"{model_name} - Loss & Accuracy Overlapped")
     plt.tight_layout()
@@ -335,14 +369,10 @@ def plot_overlapped_metrics(json_path: str, figsize: Sequence[int] = (10, 6),
     plt.show()
 
     print(f"\nModel statistics for {model_name}:")
-    if "test_losses" in data:
-        print(f"  Best Test Loss: {min(data['test_losses']):.4f}")
-    elif "val_losses" in data:
-        print(f"  Best Validation Loss: {min(data['val_losses']):.4f}")
-    if "test_accs" in data:
-        print(f"  Best Test Accuracy: {max(data['test_accs']):.4f}")
-    elif "val_accs" in data:
-        print(f"  Best Validation Accuracy: {max(data['val_accs']):.4f}")
+    if target_losses:
+        print(f"  Best Validation/Test Loss: {min(target_losses):.4f}")
+    if target_accs:
+        print(f"  Best Validation/Test Accuracy: {max(target_accs):.4f}")
     print(f"  Epochs trained: {len(epochs)}")
 
 
