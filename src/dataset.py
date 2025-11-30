@@ -355,6 +355,12 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
         counts_per_class: Mapping of split to class-count dictionaries.
     """
     base_model = config["base_model"]
+    # Normalize aliases for clarity in notebooks
+    alias_map = {
+        "cnn_specs": "resnet18",
+        "cnn_mfcc": "mfcc",
+    }
+    base_model = alias_map.get(base_model, base_model)
     selected_classes = config["selected_classes"]
     batch_size = config["batch_size"]
     grayscale = config["grayscale"]

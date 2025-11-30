@@ -105,8 +105,8 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
                   q_depth: int = 3, selected_classes: Sequence[str] | None = None, batch_size: int = 8,
                   num_epochs: int = 20, learning_rate: float = 1e-3, data_root: str = "/content/drive/MyDrive/CREMAD",
                   specs_dir: str | None = None, embedding_dir: str | None = None, mfcc_dir: str | None = None,
-                  use_pretrained: bool = True, freeze_backbone: bool = False, use_generic_weights: bool = False,
-                  grayscale: bool = False, rng_seed: int = 42, **kwargs) -> dict:
+                  use_pretrained: bool | None = None, freeze_backbone: bool | None = None,
+                  use_generic_weights: bool = False, grayscale: bool = False, rng_seed: int = 42, **kwargs) -> dict:
     """
     Build a configuration dictionary for an experiment run and ensure directories exist.
 
@@ -138,6 +138,16 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
     embedding_dir = embedding_dir or os.path.join(data_root, "Embeddings")
     mfcc_dir = mfcc_dir or os.path.join(data_root, "MFCCs")
 
+    # Sensible defaults per base_model family
+    base_model_alias = {
+        "cnn_specs": "resnet18",
+        "cnn_mfcc": "mfcc",
+    }.get(base_model, base_model)
+
+    if use_pretrained is None:
+        use_pretrained = base_model_alias in {"resnet18", "vgg16"}
+    if freeze_backbone is None:
+        freeze_backbone = False
     if quantum:
         use_pretrained = False
         freeze_backbone = True
@@ -173,6 +183,13 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
         "save_root": save_root,
         "model_dir": run_dir,
     }
+    # Persist hyperparameters for reproducibility
+    try:
+        with open(os.path.join(run_dir, "hyperparams.json"), "w", encoding="utf-8") as handle:
+            json.dump(config, handle, indent=4)
+    except Exception:  # pylint: disable=broad-except
+        # Do not crash on environments without write permissions
+        pass
     return config
 
 

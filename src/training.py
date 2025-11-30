@@ -298,6 +298,14 @@ def quantum_probability_helper(
     return probs
 
 
+def freeze_module_params(module: nn.Module) -> None:
+    """
+    Set requires_grad=False for all parameters in a module.
+    """
+    for param in module.parameters():
+        param.requires_grad = False
+
+
 # Used in: crema_d_hybrid_qnn.ipynb (canonical training loop)
 def train_model(model: nn.Module, dataloaders: Dict[str, torch.utils.data.DataLoader],
                 dataset_sizes: Dict[str, int], device, num_epochs: int, learning_rate: float,

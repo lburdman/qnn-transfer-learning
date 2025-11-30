@@ -211,27 +211,7 @@ class DressedQuantumCircuit(nn.Module):
             q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float().unsqueeze(0)
         q_out = torch.cat((q_out, q_out_elem))
         return self.post_net(q_out)
-
-
-if __name__ == "__main__":
-    n_qubits = 4
-    q_depth = 3
-    max_layers = 10
-    q_delta = 0.01
-    n_classes = 3
-    batch_size = 2
-
-    device = qml.device("default.qubit", wires=n_qubits)
-    model = Quantumnet(n_qubits, q_depth, max_layers, q_delta, device, n_classes)
-    model.eval()
-    sample_input = torch.randn(batch_size, 512)
-    with torch.no_grad():
-        out = model(sample_input)
-    print("Test completed successfully")
-    print("Output shape:", out.shape)
-    print("Sample output:\n", out)
-
-
+    
 # Handy helper to visualize the qnode defined above (templated and decomposed views)
 def draw_qnode_circuit_example(
     n_qubits: int = 2,
@@ -289,3 +269,23 @@ def draw_qnode_circuit_example(
         plt.show()
     except Exception as exc:
         print(f"Matplotlib draw (decomposed) failed: {exc}")
+
+
+
+if __name__ == "__main__":
+    n_qubits = 4
+    q_depth = 3
+    max_layers = 10
+    q_delta = 0.01
+    n_classes = 3
+    batch_size = 2
+
+    device = qml.device("default.qubit", wires=n_qubits)
+    model = Quantumnet(n_qubits, q_depth, max_layers, q_delta, device, n_classes)
+    model.eval()
+    sample_input = torch.randn(batch_size, 512)
+    with torch.no_grad():
+        out = model(sample_input)
+    print("Test completed successfully")
+    print("Output shape:", out.shape)
+    print("Sample output:\n", out)

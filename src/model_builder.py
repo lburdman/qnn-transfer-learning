@@ -250,7 +250,11 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
     Returns:
         Configured model moved to the specified device.
     """
-    base_model = config["base_model"]
+    alias_map = {
+        "cnn_specs": "resnet18",
+        "cnn_mfcc": "mfcc",
+    }
+    base_model = alias_map.get(config["base_model"], config["base_model"])
     quantum = config["quantum"]
     classical_model = config["classical_model"]
     n_qubits = config["n_qubits"]
