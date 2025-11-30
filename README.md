@@ -27,13 +27,13 @@ Speech emotion recognition on the CREMA-D dataset using classical CNNs, precompu
 5. Metrics and checkpoints are saved under `CREMAD/Models/...` as described above.
 
 ## Source Layout
-- `src/dataset.py` � Dataloaders for spectrograms, embeddings, and MFCCs.
-- `src/audio_processing.py` � In-memory audio feature computation (MEL/MFCC).
-- `src/model_builder.py` � Backbone/embedding constructors, classical/quantum heads.
-- `src/training.py` � Training loops, fine-tuning helpers, evaluation utilities.
-- `src/quantum_circuit.py` � Quantum circuit builders and analysis helpers.
-- `src/plot_functions.py` � Metric plotting utilities.
-- `tests/` � Basic shape/loader/model sanity tests.
+- `src/dataset.py` Dataloaders for spectrograms, embeddings, and MFCCs.
+- `src/audio_processing.py` In-memory audio feature computation (MEL/MFCC).
+- `src/model_builder.py` Backbone/embedding constructors, classical/quantum heads.
+- `src/training.py` Training loops, fine-tuning helpers, evaluation utilities.
+- `src/quantum_circuit.py` Quantum circuit builders and analysis helpers.
+- `src/plot_functions.py` Metric plotting utilities.
+- `tests/` Basic shape/loader/model sanity tests.
 
 ## Environment
 - Python 3.x, PyTorch, TorchVision.

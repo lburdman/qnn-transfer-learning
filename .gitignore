@@ -4,13 +4,9 @@ runs/
 runs_updated/
 models/
 MNIST/
-cancer_pablo/
-cancer/
 __pycache__/
-MyEstimatorQNN.py
-MyTorchConnector.py
+src/__pycache__/
 *.idx1-ubyte
 *.idx3-ubyte
 *.pdf
-cursor/
 *.zip

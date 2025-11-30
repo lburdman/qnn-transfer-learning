@@ -9,6 +9,8 @@ from pennylane import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+from typing import Optional
+from pathlib import Path
 
 
 # Used in: src.quantum_circuit.build_qnode (Hadamard initialization)
@@ -75,6 +77,69 @@ def build_qnode(n_qubits: int, q_depth: int, max_layers: int, dev) -> qml.QNode:
         return [qml.expval(qml.PauliZ(j)) for j in range(n_qubits)]
 
     return q_net
+
+
+def draw_qnode_circuit_example(n_qubits: int, q_depth: int, max_layers: Optional[int] = None, seed: int = 0):
+    """
+    Build and print a simple circuit diagram matching the BasicEntanglerLayers-based quantum head.
+
+    Args:
+        n_qubits: Number of qubits.
+        q_depth: Depth (number of entangler layers).
+        max_layers: Optional override for the number of parameter layers (defaults to q_depth).
+        seed: Seed for reproducible random weights.
+    """
+    max_layers = max_layers or q_depth
+    rng = np.random.default_rng(seed)
+    dev = qml.device("default.qubit", wires=n_qubits)
+
+    @qml.qnode(dev)
+    def qnode(inputs, weights):
+        qml.AngleEmbedding(inputs, wires=range(n_qubits))
+        qml.BasicEntanglerLayers(weights, wires=range(n_qubits))
+        return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
+
+    inputs = np.zeros((n_qubits,), dtype=np.float32)
+    weights = rng.standard_normal((q_depth, n_qubits))
+    diagram = qml.draw(qnode)(inputs, weights)
+    print(diagram)
+    try:
+        fig, _ = qml.draw_mpl(qnode)(inputs, weights)
+        plt.show()
+        return fig
+    except Exception:  # pragma: no cover
+        return diagram
+
+
+def analyze_trained_quantum_head(model: nn.Module, n_qubits: int, q_depth: int, device, save_dir: Optional[str] = None):
+    """
+    Print the quantum circuit diagram used in the head and report a simple purity diagnostic
+    on a zero input example.
+    """
+    dev = qml.device("default.qubit", wires=n_qubits)
+
+    @qml.qnode(dev)
+    def qnode(inputs, weights):
+        qml.AngleEmbedding(inputs, wires=range(n_qubits))
+        qml.BasicEntanglerLayers(weights, wires=range(n_qubits))
+        return qml.state()
+
+    with torch.no_grad():
+        dummy_weights = torch.zeros((q_depth, n_qubits), device=device)
+    diagram = qml.draw(qnode)(np.zeros(n_qubits), dummy_weights.cpu().numpy())
+    print("Quantum head circuit (AngleEmbedding + BasicEntanglerLayers):")
+    print(diagram)
+
+    state = qnode(np.zeros(n_qubits), np.zeros((q_depth, n_qubits)))
+    rho = np.outer(state, state.conj())
+    purity = np.trace(rho @ rho).real
+    print(f"Purity of zero-input state: {purity:.4f}")
+    if save_dir:
+        try:
+            fig, _ = qml.draw_mpl(qnode)(np.zeros(n_qubits), np.zeros((q_depth, n_qubits)))
+            fig.savefig(Path(save_dir) / "quantum_circuit.png", dpi=300, bbox_inches="tight")  # type: ignore[arg-type]
+        except Exception:  # pragma: no cover
+            pass
 
 
 # Used in: ants_bees.ipynb (hybrid head), crema-d*.ipynb (hybrid head)
