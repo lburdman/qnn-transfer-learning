@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pennylane as qml
 from pennylane import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 
@@ -110,7 +111,7 @@ class Quantumnet(nn.Module):
         q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
         for elem in q_in:
             q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float().unsqueeze(0)
-            q_out = torch.cat((q_out, q_out_elem))
+        q_out = torch.cat((q_out, q_out_elem))
         return self.post_net(q_out)
 
 
@@ -208,7 +209,7 @@ class DressedQuantumCircuit(nn.Module):
         q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
         for elem in q_in:
             q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float().unsqueeze(0)
-            q_out = torch.cat((q_out, q_out_elem))
+        q_out = torch.cat((q_out, q_out_elem))
         return self.post_net(q_out)
 
 
@@ -229,3 +230,62 @@ if __name__ == "__main__":
     print("Test completed successfully")
     print("Output shape:", out.shape)
     print("Sample output:\n", out)
+
+
+# Handy helper to visualize the qnode defined above (templated and decomposed views)
+def draw_qnode_circuit_example(
+    n_qubits: int = 2,
+    q_depth: int = 2,
+    max_layers: int | None = None,
+    seed: int | None = None,
+    style: str = "pennylane",
+):
+    """
+    Draw the qnode built by build_qnode both at the template level and decomposed into basic gates.
+    This mirrors the notebook helper but uses the circuit defined in this module.
+    """
+
+    # max_layers should at least cover the accessed slices inside build_qnode
+    effective_max_layers = max_layers if max_layers is not None else q_depth + 1
+
+    rng = np.random.default_rng(seed)
+    q_in = torch.tensor(rng.uniform(-np.pi, np.pi, size=(n_qubits,)), dtype=torch.float32)
+    q_weights_flat = torch.tensor(
+        rng.uniform(-1.0, 1.0, size=(effective_max_layers * n_qubits,)), dtype=torch.float32
+    )
+
+    dev = qml.device("default.qubit", wires=n_qubits)
+    qnode = build_qnode(n_qubits, q_depth, effective_max_layers, dev)
+
+    # Run once so the tape is constructed
+    _ = qnode(q_in, q_weights_flat)
+
+    print("ASCII circuit diagram (templates):")
+    print(qml.draw(qnode)(q_in, q_weights_flat))
+
+    try:
+        drawer = qml.draw_mpl(qnode, expansion_strategy="device", style=style)
+        fig, ax = drawer(q_in, q_weights_flat)
+        ax.set_title(f"Matplotlib circuit visualization (templates, style='{style}')")
+        plt.show()
+    except Exception as exc:
+        print(f"Matplotlib draw (templates) failed: {exc}")
+
+    # Decompose to a basic gate set for a lower-level view
+    decomp_qnode = qml.transforms.decompose(
+        qnode,
+        gate_set={qml.RX, qml.RY, qml.RZ, qml.CNOT, qml.Hadamard, qml.PhaseShift},
+    )
+
+    _ = decomp_qnode(q_in, q_weights_flat)
+
+    print("\nASCII decomposed circuit (basic gates):")
+    print(qml.draw(decomp_qnode)(q_in, q_weights_flat))
+
+    try:
+        decomp_drawer = qml.draw_mpl(decomp_qnode, expansion_strategy="device", style=style)
+        fig2, ax2 = decomp_drawer(q_in, q_weights_flat)
+        ax2.set_title(f"Matplotlib circuit visualization (decomposed, style='{style}')")
+        plt.show()
+    except Exception as exc:
+        print(f"Matplotlib draw (decomposed) failed: {exc}")

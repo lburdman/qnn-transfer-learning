@@ -8,16 +8,294 @@ import copy
 import json
 import os
 import time
-from typing import Dict, Tuple
+from dataclasses import asdict, dataclass
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import torch
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support
 from torch import nn, optim
+import torch.nn.functional as F
 from torch.optim import lr_scheduler
 
 from src.utils import imshow
 from tqdm.auto import tqdm
+from src.model_builder import (
+    AudioBackboneCNN,
+    AudioEmbeddingHead,
+    BackboneWithClassifier,
+    FrozenBackboneWithHead,
+    build_quantum_head,
+    load_backbone_checkpoint,
+    save_backbone_checkpoint,
+)
+
+
+@dataclass
+class FineTuneConfig:
+    """
+    Configuration for the CREMA-D backbone pretraining and head fine-tuning pipeline.
+    """
+
+    representation: str = "mel"
+    n_qubits: int = 10
+    q_depth: int = 2
+    pretrain_epochs: int = 4
+    finetune_epochs: int = 12
+    learning_rate_pretrain: float = 1e-3
+    learning_rate_finetune_classical: float = 5e-4
+    learning_rate_finetune_quantum: float = 1e-3
+    batch_size: int = 8
+    num_workers: int = 2
+    sample_rate: int = 16000
+    duration: float = 3.0
+    n_fft: int = 1024
+    hop_length: int = 512
+    n_mels: int = 128
+    n_mfcc: int = 40
+    backbone_dir: str = os.path.join("CREMAD", "Models", "backbone")
+    embedding_dropout: float = 0.1
+    model_tag: str = "cremad"
+    device_override: str | None = None
+
+
+def resolve_device(device_override: str | None = None):
+    """
+    Resolve the torch device, preferring GPU when available.
+    """
+    if device_override:
+        return torch.device(device_override)
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def train_with_history(
+    model: nn.Module,
+    dataloaders: Dict[str, torch.utils.data.DataLoader],
+    dataset_sizes: Dict[str, int],
+    device,
+    num_epochs: int,
+    learning_rate: float,
+    model_dir: str,
+    phases: Tuple[str, ...] | None = None,
+    optimizer: optim.Optimizer | None = None,
+) -> Tuple[nn.Module, Dict[str, List[float]]]:
+    """
+    Generic training loop that logs loss/accuracy for the requested phases.
+    """
+    phases = phases or tuple(phase for phase in ("train", "val", "test") if phase in dataloaders)
+    if not phases:
+        raise ValueError("At least one dataloader phase is required.")
+
+    criterion = nn.CrossEntropyLoss()
+    opt = optimizer or optim.Adam(filter(lambda param: param.requires_grad, model.parameters()), lr=learning_rate)
+    scheduler = lr_scheduler.StepLR(opt, step_size=10, gamma=0.1)
+
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_acc = 0.0
+    history: Dict[str, List[float]] = {f"{phase}_loss": [] for phase in phases}
+    history.update({f"{phase}_acc": [] for phase in phases})
+
+    os.makedirs(model_dir, exist_ok=True)
+    model.to(device)
+
+    for epoch in range(num_epochs):
+        print(f"Epoch {epoch + 1}/{num_epochs}")
+        print("-" * 30)
+
+        for phase in phases:
+            if phase == "train":
+                model.train()
+            else:
+                model.eval()
+            running_loss = 0.0
+            running_corrects = 0
+
+            for inputs, labels in tqdm(dataloaders[phase], desc=f"{phase} {epoch + 1}/{num_epochs}", leave=False):
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+
+                opt.zero_grad()
+                with torch.set_grad_enabled(phase == "train"):
+                    outputs = model(inputs)
+                    _, preds = torch.max(outputs, 1)
+                    loss = criterion(outputs, labels)
+                    if phase == "train":
+                        loss.backward()
+                        opt.step()
+
+                running_loss += loss.item() * inputs.size(0)
+                running_corrects += torch.sum(preds == labels.data)
+
+            epoch_loss = running_loss / dataset_sizes[phase]
+            epoch_acc = running_corrects.double() / dataset_sizes[phase]
+            history[f"{phase}_loss"].append(epoch_loss)
+            history[f"{phase}_acc"].append(epoch_acc.item())
+            print(f"{phase} Loss: {epoch_loss:.4f}  Acc: {epoch_acc:.4f}")
+
+            if phase != "train" and epoch_acc > best_acc:
+                best_acc = epoch_acc
+                best_model_wts = copy.deepcopy(model.state_dict())
+        scheduler.step()
+        print()
+
+    print(f"Training complete. Best eval accuracy: {best_acc:.4f}")
+    model.load_state_dict(best_model_wts)
+    torch.save(model.state_dict(), os.path.join(model_dir, "model.pt"))
+    metrics_path = os.path.join(model_dir, "history.json")
+    with open(metrics_path, "w", encoding="utf-8") as handle:
+        json.dump(history, handle, indent=4)
+    print(f"History saved to {metrics_path}")
+    return model, history
+
+
+def pretrain_backbone_and_embedding(
+    dataloaders: Dict[str, torch.utils.data.DataLoader],
+    dataset_sizes: Dict[str, int],
+    class_names: List[str],
+    config: FineTuneConfig,
+    representation_tag: str,
+) -> Tuple[nn.Module, Dict[str, List[float]], str]:
+    """
+    Stage 1: train CNN + embedding head end-to-end, then save the reusable backbone checkpoint.
+    """
+    device = resolve_device(config.device_override)
+    backbone = AudioBackboneCNN(input_channels=1, pretrained=True)
+    embedding = AudioEmbeddingHead(backbone.output_dim, config.n_qubits, dropout=config.embedding_dropout)
+    classifier = nn.Linear(config.n_qubits, len(class_names))
+    model = BackboneWithClassifier(backbone, embedding, classifier)
+
+    model_dir = os.path.join(config.backbone_dir, representation_tag)
+    model, history = train_with_history(
+        model,
+        dataloaders,
+        dataset_sizes,
+        device=device,
+        num_epochs=config.pretrain_epochs,
+        learning_rate=config.learning_rate_pretrain,
+        model_dir=model_dir,
+        phases=tuple(phase for phase in ("train", "val", "test") if phase in dataloaders),
+    )
+
+    checkpoint_path = os.path.join(config.backbone_dir, f"{representation_tag}_backbone.pt")
+    metadata = {
+        "class_names": class_names,
+        "representation": representation_tag,
+        "config": asdict(config),
+    }
+    save_backbone_checkpoint(backbone, embedding, checkpoint_path, metadata=metadata)
+    print(f"Backbone checkpoint saved to {checkpoint_path}")
+    return model, history, checkpoint_path
+
+
+def finetune_head_only(
+    checkpoint_path: str,
+    dataloaders: Dict[str, torch.utils.data.DataLoader],
+    dataset_sizes: Dict[str, int],
+    class_names: List[str],
+    config: FineTuneConfig,
+    head_type: str,
+    representation_tag: str,
+) -> Tuple[nn.Module, Dict[str, List[float]], float]:
+    """
+    Stage 2: freeze backbone+embedding and train only the selected head (classical or quantum).
+    """
+    device = resolve_device(config.device_override)
+    backbone, embedding, metadata = load_backbone_checkpoint(
+        checkpoint_path,
+        input_channels=1,
+        n_qubits=config.n_qubits,
+        pretrained=False,
+        map_location=device,
+    )
+    backbone = backbone.to(device)
+    embedding = embedding.to(device)
+
+    if head_type == "classical":
+        head = nn.Linear(config.n_qubits, len(class_names))
+        lr = config.learning_rate_finetune_classical
+    elif head_type == "quantum":
+        head = build_quantum_head(config.n_qubits, len(class_names), config.q_depth)
+        lr = config.learning_rate_finetune_quantum
+    else:
+        raise ValueError(f"Unsupported head type: {head_type}")
+
+    model = FrozenBackboneWithHead(backbone, embedding, head)
+    model_dir = os.path.join(config.backbone_dir, representation_tag, f"{head_type}_finetune")
+    os.makedirs(model_dir, exist_ok=True)
+
+    opt = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
+    model, history = train_with_history(
+        model,
+        dataloaders,
+        dataset_sizes,
+        device=device,
+        num_epochs=config.finetune_epochs,
+        learning_rate=lr,
+        model_dir=model_dir,
+        phases=tuple(phase for phase in ("train", "val", "test") if phase in dataloaders),
+        optimizer=opt,
+    )
+
+    eval_phase = "val" if "val" in history else "test"
+    final_acc = history.get(f"{eval_phase}_acc", [0])[-1] if history.get(f"{eval_phase}_acc") else 0.0
+    summary = {
+        "head_type": head_type,
+        "representation": representation_tag,
+        "n_qubits": config.n_qubits,
+        "q_depth": config.q_depth,
+        "final_acc": final_acc,
+        "class_names": class_names,
+        "metadata": metadata,
+    }
+    with open(os.path.join(model_dir, "finetune_summary.json"), "w", encoding="utf-8") as handle:
+        json.dump(summary, handle, indent=4)
+    return model, history, final_acc
+
+
+def summarize_experiments(results: List[Dict[str, object]]) -> None:
+    """
+    Print a concise summary table of experiment outcomes.
+    """
+    if not results:
+        print("No experiment results to summarize.")
+        return
+    header = f"{'repr':<6} | {'head':<9} | {'n_qubits':<8} | {'q_depth':<7} | {'val_acc':<8}"
+    print(header)
+    print("-" * len(header))
+    for res in results:
+        print(
+            f"{res.get('representation',''):>6} | {res.get('head_type',''):>9} | "
+            f"{res.get('n_qubits',''):>8} | {res.get('q_depth',''):>7} | {res.get('final_acc',0):>8.4f}"
+        )
+
+
+def quantum_probability_helper(
+    model: nn.Module,
+    inputs: torch.Tensor,
+    class_names: List[str],
+    device,
+    max_samples: int = 4,
+) -> torch.Tensor:
+    """
+    Compute and optionally plot class probabilities from a quantum head.
+    """
+    model.eval()
+    with torch.no_grad():
+        logits = model(inputs.to(device))
+        probs = F.softmax(logits, dim=1).cpu()
+
+    num_samples = min(max_samples, probs.shape[0])
+    fig, axes = plt.subplots(1, num_samples, figsize=(3 * num_samples, 3))
+    axes = [axes] if num_samples == 1 else axes
+    for idx in range(num_samples):
+        ax = axes[idx]
+        ax.bar(range(len(class_names)), probs[idx].numpy())
+        ax.set_xticks(range(len(class_names)))
+        ax.set_xticklabels(class_names, rotation=45, ha="right")
+        ax.set_ylim(0, 1)
+        ax.set_title(f"Sample {idx}")
+    plt.tight_layout()
+    return probs
 
 
 # Used in: crema_d_hybrid_qnn.ipynb (canonical training loop)
@@ -355,5 +633,3 @@ def load_model(model: nn.Module, quantum: bool, name: str, models_dir: str = "mo
     model.load_state_dict(torch.load(path))
     print(f"Model loaded from: {path}")
     return model
-
-

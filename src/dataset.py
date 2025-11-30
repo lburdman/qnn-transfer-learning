@@ -17,6 +17,8 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 
+from src.audio_processing import compute_log_mel_spectrogram, compute_mfcc, load_audio, normalize_feature
+
 
 # Used in: crema-d.ipynb, crema-d-updated.ipynb, crema-d-enhanced.ipynb (SpecAugment option)
 class SpecAugment:
@@ -247,6 +249,92 @@ class AudioFeatureDataset(Dataset):
             return torch.tensor(features, dtype=torch.float32), label
 
         raise ValueError(f"Unsupported base_model: {self.base_model}")
+
+
+class CREMADWaveformDataset(Dataset):
+    """
+    On-the-fly CREMA-D dataset that produces MEL spectrograms or MFCC tensors.
+
+    Args:
+        dataframe: Metadata with columns `file_path` (or `file_name`) and `label`.
+        label_to_idx: Mapping from string label to integer index.
+        representation: Either "mel" or "mfcc".
+        sample_rate: Target sampling rate for resampling.
+        duration: Duration in seconds to keep per clip.
+        n_fft: FFT window length for spectral transforms.
+        hop_length: Hop length between frames.
+        n_mels: Number of MEL bins (used for MEL and MFCC).
+        n_mfcc: Number of MFCC coefficients when representation="mfcc".
+        audio_root: Optional base directory for audio paths when `file_path` is missing.
+    """
+
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        label_to_idx: Dict[str, int],
+        representation: str = "mel",
+        sample_rate: int = 16000,
+        duration: float = 3.0,
+        n_fft: int = 1024,
+        hop_length: int = 512,
+        n_mels: int = 128,
+        n_mfcc: int = 40,
+        audio_root: str | None = None,
+    ) -> None:
+        super().__init__()
+        self.df = dataframe.reset_index(drop=True)
+        self.label_to_idx = label_to_idx
+        self.representation = representation.lower()
+        self.sample_rate = sample_rate
+        self.target_num_samples = int(sample_rate * duration)
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+        self.n_mels = n_mels
+        self.n_mfcc = n_mfcc
+        self.audio_root = audio_root
+        self.classes = list(label_to_idx.keys())
+
+        if self.representation not in {"mel", "mfcc"}:
+            raise ValueError(f"Unsupported representation: {representation}")
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def _resolve_path(self, idx: int) -> str:
+        row = self.df.iloc[idx]
+        if "file_path" in row and isinstance(row["file_path"], (str, os.PathLike)):
+            return str(row["file_path"])
+        if "file_name" not in row or self.audio_root is None:
+            raise FileNotFoundError("Audio path could not be resolved for dataset row.")
+        return os.path.join(self.audio_root, str(row["file_name"]))
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
+        audio_path = self._resolve_path(idx)
+        label_name = str(self.df.iloc[idx]["label"])
+        label = self.label_to_idx[label_name]
+
+        waveform, _ = load_audio(audio_path, target_sr=self.sample_rate, target_num_samples=self.target_num_samples)
+
+        if self.representation == "mel":
+            feature = compute_log_mel_spectrogram(
+                waveform,
+                sample_rate=self.sample_rate,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                n_mels=self.n_mels,
+            )
+        else:
+            feature = compute_mfcc(
+                waveform,
+                sample_rate=self.sample_rate,
+                n_mfcc=self.n_mfcc,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+                n_mels=self.n_mels,
+            )
+
+        feature = normalize_feature(feature).unsqueeze(0)
+        return feature, label
 
 
 # Used in: crema_d_hybrid_qnn.ipynb (hybrid data pipeline)
@@ -564,3 +652,115 @@ def load_mfcc_features(splits: Iterable[str], mfcc_dir: Path, selected_classes: 
         flatten=True,
         path_col_name="mfcc_path",
     )
+
+
+def build_cremad_audio_dataloaders(
+    audio_dir: str,
+    splits_dir: str,
+    representation: str,
+    batch_size: int = 8,
+    num_workers: int = 4,
+    sample_rate: int = 16000,
+    duration: float = 3.0,
+    n_fft: int = 1024,
+    hop_length: int = 512,
+    n_mels: int = 128,
+    n_mfcc: int = 40,
+) -> Tuple[Dict[str, DataLoader], Dict[str, int], List[str]]:
+    """
+    Build CREMA-D dataloaders that compute MEL or MFCC features on the fly.
+
+    Args:
+        audio_dir: Directory containing WAV files referenced by the split CSVs.
+        splits_dir: Directory containing train/val[/test] CSV split files.
+        representation: Either \"mel\" or \"mfcc\".
+        batch_size: Batch size for all splits.
+        num_workers: Number of dataloader workers.
+        sample_rate: Target sampling rate.
+        duration: Clip duration (seconds).
+        n_fft: FFT window length.
+        hop_length: Hop length for STFT.
+        n_mels: Number of MEL bins.
+        n_mfcc: Number of MFCC coefficients.
+
+    Returns:
+        Tuple of (dataloaders dict, dataset sizes dict, class names list).
+    """
+    meta = load_metadata(splits_dir=Path(splits_dir), audio_dir=Path(audio_dir))
+    class_names = sorted(meta["label"].unique().tolist())
+    label_to_idx = {lbl: idx for idx, lbl in enumerate(class_names)}
+
+    dataloaders: Dict[str, DataLoader] = {}
+    dataset_sizes: Dict[str, int] = {}
+    for split in ["train", "val", "test"]:
+        split_df = meta[meta["split"] == split]
+        if split_df.empty:
+            continue
+        dataset = CREMADWaveformDataset(
+            split_df,
+            label_to_idx=label_to_idx,
+            representation=representation,
+            sample_rate=sample_rate,
+            duration=duration,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            n_mels=n_mels,
+            n_mfcc=n_mfcc,
+            audio_root=audio_dir,
+        )
+        dataloaders[split] = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=(split == "train"),
+            num_workers=num_workers,
+            pin_memory=True,
+        )
+        dataset_sizes[split] = len(dataset)
+    return dataloaders, dataset_sizes, class_names
+
+
+def build_cremad_mel_and_mfcc_dataloaders(
+    audio_dir: str,
+    splits_dir: str,
+    batch_size: int = 8,
+    num_workers: int = 4,
+    sample_rate: int = 16000,
+    duration: float = 3.0,
+    n_fft: int = 1024,
+    hop_length: int = 512,
+    n_mels: int = 128,
+    n_mfcc: int = 40,
+) -> Tuple[Dict[str, DataLoader], Dict[str, DataLoader], Dict[str, int], Dict[str, int], List[str]]:
+    """
+    Convenience wrapper to build both MEL and MFCC dataloaders.
+
+    Returns:
+        dataloaders_mel, dataloaders_mfcc, dataset_sizes_mel, dataset_sizes_mfcc, class_names
+    """
+    dataloaders_mel, dataset_sizes_mel, class_names = build_cremad_audio_dataloaders(
+        audio_dir=audio_dir,
+        splits_dir=splits_dir,
+        representation="mel",
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sample_rate=sample_rate,
+        duration=duration,
+        n_fft=n_fft,
+        hop_length=hop_length,
+        n_mels=n_mels,
+        n_mfcc=n_mfcc,
+    )
+    dataloaders_mfcc, dataset_sizes_mfcc, _ = build_cremad_audio_dataloaders(
+        audio_dir=audio_dir,
+        splits_dir=splits_dir,
+        representation="mfcc",
+        batch_size=batch_size,
+        num_workers=num_workers,
+        sample_rate=sample_rate,
+        duration=duration,
+        n_fft=n_fft,
+        hop_length=hop_length,
+        n_mels=n_mels,
+        n_mfcc=n_mfcc,
+    )
+    return dataloaders_mel, dataloaders_mfcc, dataset_sizes_mel, dataset_sizes_mfcc, class_names

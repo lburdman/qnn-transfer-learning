@@ -4,7 +4,8 @@ Model construction utilities for classical and quantum-hybrid architectures.
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence
+import os
+from typing import Dict, List, Sequence, Tuple
 
 import pennylane as qml
 import torch
@@ -56,6 +57,140 @@ def create_custom_cnn(input_channels: int = 3) -> nn.Module:
     return CustomCNNBackbone(input_channels)
 
 
+class AudioBackboneCNN(nn.Module):
+    """
+    ResNet18 backbone adapted for single-channel audio \"images\".
+    """
+
+    def __init__(self, input_channels: int = 1, pretrained: bool = True) -> None:
+        super().__init__()
+        self.model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT if pretrained else None)
+        if input_channels != 3:
+            first_layer = self.model.conv1
+            self.model.conv1 = nn.Conv2d(
+                input_channels,
+                first_layer.out_channels,
+                kernel_size=first_layer.kernel_size,
+                stride=first_layer.stride,
+                padding=first_layer.padding,
+                bias=False,
+            )
+        self.output_dim = self.model.fc.in_features
+        self.model.fc = nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)
+
+
+class AudioEmbeddingHead(nn.Module):
+    """
+    Shared embedding head used for both classical and quantum fine-tuning.
+    """
+
+    def __init__(self, input_dim: int, n_qubits: int, dropout: float = 0.1) -> None:
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, 512)
+        self.act1 = nn.ReLU()
+        self.dropout = nn.Dropout(dropout) if dropout and dropout > 0 else nn.Identity()
+        self.fc2 = nn.Linear(512, 64)
+        self.act2 = nn.ReLU()
+        self.fc3 = nn.Linear(64, n_qubits)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.act1(self.fc1(x))
+        x = self.dropout(x)
+        x = self.act2(self.fc2(x))
+        return self.fc3(x)
+
+
+class BackboneWithClassifier(nn.Module):
+    """
+    End-to-end model used for pretraining (backbone + embedding + linear classifier).
+    """
+
+    def __init__(self, backbone: nn.Module, embedding: nn.Module, classifier: nn.Module) -> None:
+        super().__init__()
+        self.backbone = backbone
+        self.embedding = embedding
+        self.classifier = classifier
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        feats = self.backbone(x)
+        return self.embedding(feats)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.forward_features(x)
+        return self.classifier(z)
+
+
+def freeze_backbone(backbone: nn.Module, embedding: nn.Module) -> None:
+    """
+    Freeze all parameters of the backbone + embedding stack.
+    """
+    for module in (backbone, embedding):
+        for param in module.parameters():
+            param.requires_grad = False
+
+
+def save_backbone_checkpoint(
+    backbone: nn.Module,
+    embedding: nn.Module,
+    checkpoint_path: str,
+    metadata: Dict[str, object] | None = None,
+) -> None:
+    """
+    Persist backbone and embedding weights for reuse during fine-tuning.
+    """
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+    payload = {
+        "backbone": backbone.state_dict(),
+        "embedding": embedding.state_dict(),
+        "metadata": metadata or {},
+    }
+    torch.save(payload, checkpoint_path)
+
+
+def load_backbone_checkpoint(
+    checkpoint_path: str,
+    input_channels: int,
+    n_qubits: int,
+    pretrained: bool = False,
+    map_location: torch.device | None = None,
+) -> Tuple[nn.Module, nn.Module, Dict[str, object]]:
+    """
+    Reload backbone and embedding modules from disk.
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+    backbone = AudioBackboneCNN(input_channels=input_channels, pretrained=pretrained)
+    embedding = AudioEmbeddingHead(backbone.output_dim, n_qubits)
+    backbone.load_state_dict(checkpoint["backbone"])
+    embedding.load_state_dict(checkpoint["embedding"])
+    freeze_backbone(backbone, embedding)
+    metadata = checkpoint.get("metadata", {})
+    return backbone, embedding, metadata
+
+
+class FrozenBackboneWithHead(nn.Module):
+    """
+    Wrapper for fine-tuning: frozen backbone+embedding with a trainable head.
+    """
+
+    def __init__(self, backbone: nn.Module, embedding: nn.Module, head: nn.Module) -> None:
+        super().__init__()
+        freeze_backbone(backbone, embedding)
+        self.backbone = backbone
+        self.embedding = embedding
+        self.head = head
+
+    def forward_features(self, x: torch.Tensor) -> torch.Tensor:
+        feats = self.backbone(x)
+        return self.embedding(feats)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        bottleneck = self.forward_features(x)
+        return self.head(bottleneck)
+
+
 # Used in: crema_d_hybrid_qnn.ipynb (quantum layer construction)
 def build_quantum_layer(n_qubits: int, q_depth: int):
     """
@@ -78,6 +213,27 @@ def build_quantum_layer(n_qubits: int, q_depth: int):
 
     weight_shapes = {"weights": (q_depth, n_qubits)}
     return qml.qnn.TorchLayer(circuit, weight_shapes)
+
+
+def build_quantum_head(n_qubits: int, n_classes: int, q_depth: int):
+    """
+    Build a PennyLane TorchLayer that outputs class logits directly.
+
+    Args:
+        n_qubits: Number of qubits (and input dimension).
+        n_classes: Number of output classes.
+        q_depth: Depth of entangling layers.
+    """
+    dev = qml.device("default.qubit", wires=n_qubits)
+
+    @qml.qnode(dev)
+    def qnode(inputs, weights):
+        qml.AngleEmbedding(inputs, wires=range(n_qubits))
+        qml.BasicEntanglerLayers(weights, wires=range(n_qubits))
+        return [qml.expval(qml.PauliZ(i)) for i in range(n_classes)]
+
+    weight_shapes = {"weights": (q_depth, n_qubits)}
+    return qml.qnn.TorchLayer(qnode, weight_shapes)
 
 
 # Used in: crema_d_hybrid_qnn.ipynb (model assembly)
