@@ -115,17 +115,19 @@ def analyze_trained_quantum_head(
 ):
     """
     Print the quantum circuit diagram used in the head and report a simple purity diagnostic
-    using the trained weights.
+    using the trained weights. Uses the last TorchLayer when multiple are present.
     """
-    # Locate TorchLayer weights
-    qlayer = None
-    for module in model.modules():
-        if isinstance(module, qml.qnn.TorchLayer):
-            qlayer = module
-            break
-    if qlayer is None:
+    try:
+        torchlayer_cls = qml.qnn.TorchLayer
+    except Exception:
+        print("PennyLane not available; cannot analyze quantum head.")
+        return
+
+    qlayers = [m for m in model.modules() if isinstance(m, torchlayer_cls)]
+    if not qlayers:
         print("No PennyLane TorchLayer found in model.")
         return
+    qlayer = qlayers[-1]
 
     # Extract trained weights
     trained_weights = None
@@ -137,6 +139,8 @@ def analyze_trained_quantum_head(
         print("No trainable weights found in quantum layer.")
         return
 
+    n_qubits = trained_weights.shape[1]
+    q_depth = trained_weights.shape[0]
     dev = qml.device("default.qubit", wires=n_qubits)
 
     @qml.qnode(dev)
@@ -145,8 +149,6 @@ def analyze_trained_quantum_head(
         qml.BasicEntanglerLayers(weights, wires=range(n_qubits))
         return qml.state()
 
-    n_qubits = trained_weights.shape[1]
-    q_depth = trained_weights.shape[0]
     inputs = sample_input if sample_input is not None else np.zeros((n_qubits,), dtype=np.float32)
     weights_np = trained_weights.cpu().numpy()
     diagram = qml.draw(qnode)(inputs, weights_np)
@@ -342,7 +344,6 @@ def draw_qnode_circuit_example(
     try:
         drawer = qml.draw_mpl(qnode, expansion_strategy="device", style=style)
         fig, ax = drawer(q_in, q_weights_flat)
-        ax.set_title(f"Matplotlib circuit visualization (templates, style='{style}')")
         plt.show()
     except Exception as exc:
         print(f"Matplotlib draw (templates) failed: {exc}")
@@ -361,7 +362,6 @@ def draw_qnode_circuit_example(
     try:
         decomp_drawer = qml.draw_mpl(decomp_qnode, expansion_strategy="device", style=style)
         fig2, ax2 = decomp_drawer(q_in, q_weights_flat)
-        ax2.set_title(f"Matplotlib circuit visualization (decomposed, style='{style}')")
         plt.show()
     except Exception as exc:
         print(f"Matplotlib draw (decomposed) failed: {exc}")

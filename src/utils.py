@@ -11,6 +11,7 @@ from typing import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+import json
 from PIL import Image
 from torch.utils.data import DataLoader
 
@@ -100,7 +101,6 @@ def show_exact_images_from_dataloader(dataloader: DataLoader, phase: str = "trai
     plt.show()
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (experiment setup)
 def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq_2", n_qubits: int = 4,
                   q_depth: int = 3, selected_classes: Sequence[str] | None = None, batch_size: int = 8,
                   num_epochs: int = 20, learning_rate: float = 1e-3, data_root: str = "/content/drive/MyDrive/CREMAD",
@@ -109,36 +109,12 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
                   use_generic_weights: bool = False, grayscale: bool = False, rng_seed: int = 42, **kwargs) -> dict:
     """
     Build a configuration dictionary for an experiment run and ensure directories exist.
-
-    Args:
-        base_model: Backbone identifier.
-        quantum: Whether to use the quantum head.
-        classical_model: Classifier head selection for classical runs.
-        n_qubits: Number of qubits for the quantum layer.
-        q_depth: Quantum circuit depth.
-        selected_classes: Optional subset of labels to keep.
-        batch_size: Batch size for training.
-        num_epochs: Number of training epochs.
-        learning_rate: Optimizer learning rate.
-        data_root: Root directory for dataset artifacts.
-        specs_dir: Spectrogram directory override.
-        embedding_dir: Embedding directory override.
-        mfcc_dir: MFCC directory override.
-        use_pretrained: Whether to load pretrained weights for classical backbones.
-        freeze_backbone: Whether to freeze backbone weights.
-        use_generic_weights: Initialize linear layers with a generic normal distribution.
-        grayscale: Whether to train on grayscale inputs.
-        rng_seed: Random seed to store in the configuration.
-        **kwargs: Ignored extras preserved for compatibility.
-
-    Returns:
-        Configuration dictionary with run directories included.
+    Saves the full config to config.json in the run directory.
     """
     specs_dir = specs_dir or os.path.join(data_root, "Spectrograms")
     embedding_dir = embedding_dir or os.path.join(data_root, "Embeddings")
     mfcc_dir = mfcc_dir or os.path.join(data_root, "MFCCs")
 
-    # Sensible defaults per base_model family
     base_model_alias = {
         "cnn_specs": "resnet18",
         "cnn_mfcc": "mfcc",
@@ -183,15 +159,14 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
         "save_root": save_root,
         "model_dir": run_dir,
     }
+
     # Persist configuration for reproducibility
     try:
         with open(os.path.join(run_dir, "config.json"), "w", encoding="utf-8") as handle:
             json.dump(config, handle, indent=4)
-    except Exception:  # pylint: disable=broad-except
-        # Do not crash on environments without write permissions
+    except Exception:
         pass
     return config
-
 
 # Used in: audio_preprocessing.ipynb (directory setup), data_analysis.ipynb (file operations)
 def create_dir(path: str | Path) -> None:
