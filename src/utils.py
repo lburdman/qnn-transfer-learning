@@ -183,9 +183,9 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
         "save_root": save_root,
         "model_dir": run_dir,
     }
-    # Persist hyperparameters for reproducibility
+    # Persist configuration for reproducibility
     try:
-        with open(os.path.join(run_dir, "hyperparams.json"), "w", encoding="utf-8") as handle:
+        with open(os.path.join(run_dir, "config.json"), "w", encoding="utf-8") as handle:
             json.dump(config, handle, indent=4)
     except Exception:  # pylint: disable=broad-except
         # Do not crash on environments without write permissions

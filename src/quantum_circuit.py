@@ -103,19 +103,40 @@ def draw_qnode_circuit_example(n_qubits: int, q_depth: int, max_layers: Optional
     weights = rng.standard_normal((q_depth, n_qubits))
     diagram = qml.draw(qnode)(inputs, weights)
     print(diagram)
-    try:
-        fig, _ = qml.draw_mpl(qnode)(inputs, weights)
-        plt.show()
-        return fig
-    except Exception:  # pragma: no cover
-        return diagram
+    return diagram
 
 
-def analyze_trained_quantum_head(model: nn.Module, n_qubits: int, q_depth: int, device, save_dir: Optional[str] = None):
+def analyze_trained_quantum_head(
+    model: nn.Module,
+    device,
+    sample_input: Optional[np.ndarray] = None,
+    print_density: bool = False,
+    save_dir: Optional[str] = None,
+):
     """
     Print the quantum circuit diagram used in the head and report a simple purity diagnostic
-    on a zero input example.
+    using the trained weights.
     """
+    # Locate TorchLayer weights
+    qlayer = None
+    for module in model.modules():
+        if isinstance(module, qml.qnn.TorchLayer):
+            qlayer = module
+            break
+    if qlayer is None:
+        print("No PennyLane TorchLayer found in model.")
+        return
+
+    # Extract trained weights
+    trained_weights = None
+    for name, param in qlayer.named_parameters():
+        if name == "weights":
+            trained_weights = param.detach().to(device)
+            break
+    if trained_weights is None:
+        print("No trainable weights found in quantum layer.")
+        return
+
     dev = qml.device("default.qubit", wires=n_qubits)
 
     @qml.qnode(dev)
@@ -124,20 +145,30 @@ def analyze_trained_quantum_head(model: nn.Module, n_qubits: int, q_depth: int, 
         qml.BasicEntanglerLayers(weights, wires=range(n_qubits))
         return qml.state()
 
-    with torch.no_grad():
-        dummy_weights = torch.zeros((q_depth, n_qubits), device=device)
-    diagram = qml.draw(qnode)(np.zeros(n_qubits), dummy_weights.cpu().numpy())
-    print("Quantum head circuit (AngleEmbedding + BasicEntanglerLayers):")
+    n_qubits = trained_weights.shape[1]
+    q_depth = trained_weights.shape[0]
+    inputs = sample_input if sample_input is not None else np.zeros((n_qubits,), dtype=np.float32)
+    weights_np = trained_weights.cpu().numpy()
+    diagram = qml.draw(qnode)(inputs, weights_np)
+    print("Quantum head circuit with trained parameters:")
     print(diagram)
 
-    state = qnode(np.zeros(n_qubits), np.zeros((q_depth, n_qubits)))
-    rho = np.outer(state, state.conj())
-    purity = np.trace(rho @ rho).real
-    print(f"Purity of zero-input state: {purity:.4f}")
+    if print_density:
+        state = qnode(inputs, weights_np)
+        rho = np.outer(state, state.conj())
+        purity = np.trace(rho @ rho).real
+        print(f"Purity of provided-input state: {purity:.4f}")
+
     if save_dir:
+        save_dir = Path(save_dir)
         try:
-            fig, _ = qml.draw_mpl(qnode)(np.zeros(n_qubits), np.zeros((q_depth, n_qubits)))
-            fig.savefig(Path(save_dir) / "quantum_circuit.png", dpi=300, bbox_inches="tight")  # type: ignore[arg-type]
+            fig, _ = qml.draw_mpl(qnode, expansion_strategy="device")(inputs, weights_np)
+            fig.savefig(save_dir / "quantum_circuit_decomposed.png", dpi=300, bbox_inches="tight")  # type: ignore[arg-type]
+        except Exception:  # pragma: no cover
+            pass
+        try:
+            fig_plain, _ = qml.draw_mpl(qnode)(inputs, weights_np)
+            fig_plain.savefig(save_dir / "quantum_circuit.png", dpi=300, bbox_inches="tight")  # type: ignore[arg-type]
         except Exception:  # pragma: no cover
             pass
 
