@@ -241,10 +241,22 @@ class AudioFeatureDataset(Dataset):
             embedding = np.array(data[key], dtype=np.float32)
             return torch.tensor(embedding, dtype=torch.float32), label
 
-        if self.base_model == "mfcc":
+        if self.base_model in ["mfcc", "cnn_mfcc"]:
             data = np.load(path)
             key = "mfcc" if "mfcc" in data else list(data.keys())[0]
             mfcc = np.array(data[key], dtype=np.float32)
+            # Pad/trim MFCC along time axis to ensure consistent shapes
+            target_len = getattr(self, "pad_mfcc_len", None)
+            if target_len is not None:
+                current_len = mfcc.shape[1]
+                if current_len < target_len:
+                    pad_width = ((0, 0), (0, target_len - current_len))
+                    mfcc = np.pad(mfcc, pad_width, mode="constant")
+                elif current_len > target_len:
+                    mfcc = mfcc[:, :target_len]
+            if self.base_model == "cnn_mfcc":
+                # Return as 1 x H x W tensor for CNNs
+                return torch.tensor(mfcc[None, ...], dtype=torch.float32), label
             features = mfcc.flatten()
             return torch.tensor(features, dtype=torch.float32), label
 
@@ -355,10 +367,9 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
         counts_per_class: Mapping of split to class-count dictionaries.
     """
     base_model = config["base_model"]
-    # Normalize aliases for clarity in notebooks
+    # Normalize aliases for clarity in notebooks (keep cnn_mfcc separate to preserve 2D MFCC handling)
     alias_map = {
         "cnn_specs": "resnet18",
-        "cnn_mfcc": "mfcc",
     }
     base_model = alias_map.get(base_model, base_model)
     selected_classes = config["selected_classes"]
@@ -442,8 +453,9 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
             counter = Counter(labels)
             counts_per_class[phase] = {cls: counter.get(cls, 0) for cls in class_names}
 
-    elif base_model == "mfcc":
+    elif base_model in ["mfcc", "cnn_mfcc"]:
         root = str(config["mfcc_dir"])
+        pad_frames = int(config.get("mfcc_pad_frames", 500))
         phases = [phase for phase in ["train", "val", "test"] if os.path.isdir(os.path.join(root, phase))]
         class_names = None
         for phase in phases:
@@ -464,6 +476,7 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
                 class_names = sorted(list(set(labels)))
             label_indices = [class_names.index(lbl) for lbl in labels]
             dataset = AudioFeatureDataset(files, label_indices, base_model)
+            setattr(dataset, "pad_mfcc_len", pad_frames)
             dataloaders[phase] = DataLoader(
                 dataset,
                 batch_size=batch_size,

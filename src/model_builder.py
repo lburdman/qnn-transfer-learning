@@ -252,7 +252,6 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
     """
     alias_map = {
         "cnn_specs": "resnet18",
-        "cnn_mfcc": "mfcc",
     }
     base_model = alias_map.get(config["base_model"], config["base_model"])
     quantum = config["quantum"]
@@ -376,6 +375,29 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
                     nn.ReLU(),
                     nn.Linear(512, n_classes),
                 )
+
+    elif base_model == "cnn_mfcc":
+        # Treat MFCC as a 1-channel image and use a ResNet backbone
+        model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT if use_pretrained else None)
+        model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        if freeze_backbone:
+            for param in model.parameters():
+                param.requires_grad = False
+        in_features = model.fc.in_features
+        if quantum:
+            qlayer = build_quantum_layer(n_qubits, q_depth)
+            model.fc = nn.Sequential(
+                nn.Linear(in_features, n_qubits),
+                nn.ReLU(),
+                qlayer,
+                nn.Linear(n_qubits, n_classes),
+            )
+        else:
+            model.fc = nn.Sequential(
+                nn.Linear(in_features, 512),
+                nn.ReLU(),
+                nn.Linear(512, n_classes),
+            )
 
     elif base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14", "mfcc"]:
         sample_inputs, _ = next(iter(dataloaders["train"]))
