@@ -486,6 +486,16 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
             dataset_sizes[phase] = len(dataset)
             counter = Counter(labels)
             counts_per_class[phase] = {cls: counter.get(cls, 0) for cls in class_names}
+        # If no explicit train split exists but val exists, reuse val as train to enable training.
+        if "train" not in dataloaders and "val" in dataloaders:
+            dataloaders["train"] = DataLoader(
+                dataloaders["val"].dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+            )
+            dataset_sizes["train"] = len(dataloaders["val"].dataset)
+            counts_per_class["train"] = counts_per_class["val"]
     else:
         raise ValueError(f"Unsupported base_model: {base_model}")
 

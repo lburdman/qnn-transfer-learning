@@ -113,7 +113,7 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
     """
     specs_dir = specs_dir or os.path.join(data_root, "Spectrograms")
     embedding_dir = embedding_dir or os.path.join(data_root, "Embeddings")
-    mfcc_dir = mfcc_dir or os.path.join(data_root, "MFCCs")
+    mfcc_dir = mfcc_dir or os.path.join(data_root, "MFCC")
 
     base_model_alias = {
         "cnn_specs": "resnet18",
