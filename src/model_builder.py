@@ -14,7 +14,6 @@ import torchvision
 from torch.utils.data import DataLoader
 from torchvision.models import ResNet18_Weights, VGG16_Weights
 
-
 # Used in: crema_d_hybrid_qnn.ipynb (custom CNN backbone)
 def create_custom_cnn(input_channels: int = 3) -> nn.Module:
     """
@@ -62,9 +61,9 @@ class AudioBackboneCNN(nn.Module):
     ResNet18 backbone adapted for single-channel audio \"images\".
     """
 
-    def __init__(self, input_channels: int = 1, pretrained: bool = True) -> None:
+    def __init__(self, input_channels: int = 1) -> None:
         super().__init__()
-        self.model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT if pretrained else None)
+        self.model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
         if input_channels != 3:
             first_layer = self.model.conv1
             self.model.conv1 = nn.Conv2d(
@@ -154,14 +153,13 @@ def load_backbone_checkpoint(
     checkpoint_path: str,
     input_channels: int,
     n_qubits: int,
-    pretrained: bool = False,
     map_location: torch.device | None = None,
 ) -> Tuple[nn.Module, nn.Module, Dict[str, object]]:
     """
     Reload backbone and embedding modules from disk.
     """
     checkpoint = torch.load(checkpoint_path, map_location=map_location)
-    backbone = AudioBackboneCNN(input_channels=input_channels, pretrained=pretrained)
+    backbone = AudioBackboneCNN(input_channels=input_channels)
     embedding = AudioEmbeddingHead(backbone.output_dim, n_qubits)
     backbone.load_state_dict(checkpoint["backbone"])
     embedding.load_state_dict(checkpoint["embedding"])
@@ -251,23 +249,20 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
         Configured model moved to the specified device.
     """
     alias_map = {
-        "cnn_specs": "resnet18",
+        "cnn_specs": "cnn_specs",
+        "cnn_mfcc": "cnn_mfcc",
     }
     base_model = alias_map.get(config["base_model"], config["base_model"])
     quantum = config["quantum"]
     classical_model = config["classical_model"]
     n_qubits = config["n_qubits"]
     q_depth = config["q_depth"]
-    use_pretrained = config["use_pretrained"]
-    freeze_backbone = config["freeze_backbone"]
-    use_generic_weights = config["use_generic_weights"]
-    grayscale = config["grayscale"]
+    # grayscale = config["grayscale"]
     n_classes = len(class_names)
 
     model = None
     if base_model == "custom_cnn":
-        force_three_channels = bool(grayscale and use_pretrained)
-        input_channels = 1 if (grayscale and not force_three_channels) else 3
+        input_channels = 1 
         backbone = create_custom_cnn(input_channels=input_channels)
         feature_dim = getattr(backbone, "output_dim", 512)
         if quantum:
@@ -300,12 +295,7 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
         model = nn.Sequential(backbone, head)
 
     elif base_model == "resnet18":
-        model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT if use_pretrained else None)
-        if grayscale:
-            model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        if freeze_backbone:
-            for param in model.parameters():
-                param.requires_grad = False
+        model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
         in_features = model.fc.in_features
         if quantum:
             qlayer = build_quantum_layer(n_qubits, q_depth)
@@ -334,21 +324,7 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
                 )
 
     elif base_model == "vgg16":
-        model = torchvision.models.vgg16(weights=VGG16_Weights.DEFAULT if use_pretrained else None)
-        if grayscale:
-            first_layer = model.features[0]
-            if isinstance(first_layer, nn.Conv2d) and first_layer.in_channels == 3:
-                model.features[0] = nn.Conv2d(
-                    1,
-                    first_layer.out_channels,
-                    kernel_size=first_layer.kernel_size,
-                    stride=first_layer.stride,
-                    padding=first_layer.padding,
-                    bias=False,
-                )
-        if freeze_backbone:
-            for param in model.parameters():
-                param.requires_grad = False
+        model = torchvision.models.vgg16(weights=VGG16_Weights.DEFAULT)
         in_features = model.classifier[6].in_features
         if quantum:
             qlayer = build_quantum_layer(n_qubits, q_depth)
@@ -378,11 +354,8 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
 
     elif base_model == "cnn_mfcc":
         # Treat MFCC as a 1-channel image and use a ResNet backbone
-        model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT if use_pretrained else None)
+        model = torchvision.models.resnet18(weights=None)
         model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        if freeze_backbone:
-            for param in model.parameters():
-                param.requires_grad = False
         in_features = model.fc.in_features
         if quantum:
             qlayer = build_quantum_layer(n_qubits, q_depth)
@@ -399,7 +372,26 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
                 nn.Linear(512, n_classes),
             )
 
-    elif base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14", "mfcc"]:
+    elif base_model == "cnn_specs":
+        # Spectrogram PNGs treated as 3-channel images, ResNet18 from scratch
+        model = torchvision.models.resnet18(weights=None)
+        in_features = model.fc.in_features
+        if quantum:
+            qlayer = build_quantum_layer(n_qubits, q_depth)
+            model.fc = nn.Sequential(
+                nn.Linear(in_features, n_qubits),
+                nn.ReLU(),
+                qlayer,
+                nn.Linear(n_qubits, n_classes),
+            )
+        else:
+            model.fc = nn.Sequential(
+                nn.Linear(in_features, 512),
+                nn.ReLU(),
+                nn.Linear(512, n_classes),
+            )
+
+    elif base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14"]:
         sample_inputs, _ = next(iter(dataloaders["train"]))
         input_dim = sample_inputs.shape[1] if sample_inputs.ndim > 1 else sample_inputs.numel()
         if quantum:
@@ -429,13 +421,6 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
                 )
     else:
         raise ValueError(f"Unsupported base_model: {base_model}")
-
-    if use_generic_weights and not quantum and model is not None:
-        for module in model.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.normal_(module.weight, mean=0.0, std=0.01)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0.0)
 
     if model is None:
         raise RuntimeError("Model construction failed; check configuration.")

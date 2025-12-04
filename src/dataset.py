@@ -375,7 +375,7 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
     selected_classes = config["selected_classes"]
     batch_size = config["batch_size"]
     grayscale = config["grayscale"]
-    use_pretrained = config["use_pretrained"]
+    use_pretrained = config.get("use_pretrained", False)
     force_three_channels = bool(grayscale and use_pretrained)
 
     dataloaders: Dict[str, DataLoader] = {}

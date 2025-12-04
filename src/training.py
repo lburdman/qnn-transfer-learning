@@ -224,7 +224,6 @@ def finetune_head_only(
         checkpoint_path,
         input_channels=1,
         n_qubits=config.n_qubits,
-        pretrained=False,
         map_location=device,
     )
     backbone = backbone.to(device)

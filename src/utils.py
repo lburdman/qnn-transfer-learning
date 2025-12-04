@@ -12,6 +12,7 @@ from typing import Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import json
+import torch
 from PIL import Image
 from torch.utils.data import DataLoader
 
@@ -105,8 +106,7 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
                   q_depth: int = 3, selected_classes: Sequence[str] | None = None, batch_size: int = 8,
                   num_epochs: int = 20, learning_rate: float = 1e-3, data_root: str = "/content/drive/MyDrive/CREMAD",
                   specs_dir: str | None = None, embedding_dir: str | None = None, mfcc_dir: str | None = None,
-                  use_pretrained: bool | None = None, freeze_backbone: bool | None = None,
-                  use_generic_weights: bool = False, grayscale: bool = False, rng_seed: int = 42, **kwargs) -> dict:
+                  grayscale: bool = False, rng_seed: int = 42, **kwargs) -> dict:
     """
     Build a configuration dictionary for an experiment run and ensure directories exist.
     Saves the full config to config.json in the run directory.
@@ -114,20 +114,6 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
     specs_dir = specs_dir or os.path.join(data_root, "Spectrograms")
     embedding_dir = embedding_dir or os.path.join(data_root, "Embeddings")
     mfcc_dir = mfcc_dir or os.path.join(data_root, "MFCC")
-
-    base_model_alias = {
-        "cnn_specs": "resnet18",
-        "cnn_mfcc": "mfcc",
-    }.get(base_model, base_model)
-
-    if use_pretrained is None:
-        use_pretrained = base_model_alias in {"resnet18", "vgg16"}
-    if freeze_backbone is None:
-        freeze_backbone = False
-    if quantum:
-        use_pretrained = False
-        freeze_backbone = True
-        use_generic_weights = False
 
     save_root = os.path.join(data_root, "Models")
     model_category = f"{base_model}_{'quantum' if quantum else 'classic'}"
@@ -151,10 +137,6 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
         "specs_dir": specs_dir,
         "embedding_dir": embedding_dir,
         "mfcc_dir": mfcc_dir,
-        "use_pretrained": use_pretrained,
-        "freeze_backbone": freeze_backbone,
-        "use_generic_weights": use_generic_weights,
-        "grayscale": grayscale,
         "rng_seed": rng_seed,
         "save_root": save_root,
         "model_dir": run_dir,
@@ -193,47 +175,51 @@ def load_image(image_path: str | Path) -> Image.Image:
     return Image.open(image_path).convert("RGB")
 
 
-# DEPRECATED: replaced by the version used in crema_d_hybrid_qnn.ipynb.
-# The entire function below is kept commented out for historical reference.
-# def plot_tensorboard_metric(run_name: str, metric: str, phase: str, runs_dir: str = "runs") -> None:
-#     \"\"\"
-#     Plot a TensorBoard scalar metric for a given run and phase.
-#
-#     Args:
-#         run_name: Run directory inside `runs/`.
-#         metric: Metric name ("Loss" or "Accuracy").
-#         phase: "train" or "val".
-#         runs_dir: Base directory containing TensorBoard event files.
-#     \"\"\"
-#     from tensorboard.backend.event_processing import event_accumulator
-#     import os
-#     import matplotlib.pyplot as plt
-#
-#     log_dir = os.path.join(runs_dir, run_name)
-#     event_file = next(
-#         (os.path.join(log_dir, file) for file in os.listdir(log_dir) if file.startswith("events.out.tfevents")),
-#         None,
-#     )
-#     if event_file is None:
-#         raise FileNotFoundError(f"No event file found in {log_dir}")
-#
-#     accumulator = event_accumulator.EventAccumulator(event_file)
-#     accumulator.Reload()
-#     tag = f"{phase}/{metric}"
-#     if tag not in accumulator.Tags().get("scalars", []):
-#         raise ValueError(f"Metric '{tag}' is not available in this run.")
-#
-#     events = accumulator.Scalars(tag)
-#     steps = [event.step for event in events]
-#     values = [event.value for event in events]
-#
-#     plt.figure(figsize=(7, 4))
-#     plt.plot(steps, values, label=f"{phase} {metric}")
-#     plt.xlabel("Epoch")
-#     plt.ylabel(metric)
-#     plt.title(f"{metric} - {phase} ({run_name})")
-#     plt.ylim(0, 1)
-#     plt.grid(True)
-#     plt.legend()
-#     plt.tight_layout()
-#     plt.show()
+# Model summary helpers
+def count_params_by_kind(model) -> tuple[int, int, int, int]:
+    """
+    Count total, trainable, classical, and quantum parameters.
+    Quantum params are those belonging to PennyLane TorchLayers when available.
+    """
+    try:
+        import pennylane as qml  # type: ignore
+        torchlayer_cls = qml.qnn.TorchLayer  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover
+        torchlayer_cls = tuple()
+
+    total = sum(p.numel() for p in model.parameters())
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    quantum = 0
+    counted = set()
+    for module in model.modules():
+        if torchlayer_cls and isinstance(module, torchlayer_cls):
+            for param in module.parameters():
+                if id(param) not in counted:
+                    quantum += param.numel()
+                    counted.add(id(param))
+    # Fallback name-based scan
+    for name, param in model.named_parameters():
+        if ("torchlayer" in name.lower() or "qlayer" in name.lower()) and id(param) not in counted:
+            quantum += param.numel()
+            counted.add(id(param))
+    classical = total - quantum
+    return total, trainable, classical, quantum
+
+
+def print_model_summary(model) -> None:
+    """
+    Print a brief model summary and parameter counts.
+    """
+    try:
+        from torchinfo import summary as torchinfo_summary  # type: ignore
+        torchinfo_summary(model, verbose=0)
+    except Exception:
+        print("Torchinfo not available; showing minimal structure:")
+        for name, module in model.named_children():
+            print(f"- {name}: {module.__class__.__name__}")
+    total, trainable, classical, quantum = count_params_by_kind(model)
+    print(model)
+    print(f"Total params: {total:,}")
+    print(f"Trainable params: {trainable:,}")
+    print(f"Classical params: {classical:,}")
+    print(f"Quantum params: {quantum:,}")

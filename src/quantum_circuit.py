@@ -81,7 +81,7 @@ def build_qnode(n_qubits: int, q_depth: int, max_layers: int, dev) -> qml.QNode:
 
 def draw_qnode_circuit_example(n_qubits: int, q_depth: int, max_layers: Optional[int] = None, seed: int = 0):
     """
-    Build and print a simple circuit diagram matching the BasicEntanglerLayers-based quantum head.
+    Build and show a decomposed circuit diagram matching the BasicEntanglerLayers-based quantum head.
 
     Args:
         n_qubits: Number of qubits.
@@ -101,9 +101,14 @@ def draw_qnode_circuit_example(n_qubits: int, q_depth: int, max_layers: Optional
 
     inputs = np.zeros((n_qubits,), dtype=np.float32)
     weights = rng.standard_normal((q_depth, n_qubits))
-    diagram = qml.draw(qnode)(inputs, weights)
-    print(diagram)
-    return diagram
+    try:
+        fig, _ = qml.draw_mpl(qnode, expansion_strategy="device")(inputs, weights)
+        plt.show()
+        return fig
+    except Exception:
+        diagram = qml.draw(qnode)(inputs, weights)
+        print(diagram)
+        return diagram
 
 
 def analyze_trained_quantum_head(
@@ -151,9 +156,14 @@ def analyze_trained_quantum_head(
 
     inputs = sample_input if sample_input is not None else np.zeros((n_qubits,), dtype=np.float32)
     weights_np = trained_weights.cpu().numpy()
-    diagram = qml.draw(qnode)(inputs, weights_np)
-    print("Quantum head circuit with trained parameters:")
-    print(diagram)
+    print("Quantum head circuit (decomposed) with trained parameters:")
+    try:
+        fig, _ = qml.draw_mpl(qnode, expansion_strategy="device")(inputs, weights_np)
+        plt.show()
+    except Exception:  # pragma: no cover
+        fig = None
+        diagram = qml.draw(qnode)(inputs, weights_np)
+        print(diagram)
 
     if print_density:
         state = qnode(inputs, weights_np)
@@ -163,16 +173,11 @@ def analyze_trained_quantum_head(
 
     if save_dir:
         save_dir = Path(save_dir)
-        try:
-            fig, _ = qml.draw_mpl(qnode, expansion_strategy="device")(inputs, weights_np)
-            fig.savefig(save_dir / "quantum_circuit_decomposed.png", dpi=300, bbox_inches="tight")  # type: ignore[arg-type]
-        except Exception:  # pragma: no cover
-            pass
-        try:
-            fig_plain, _ = qml.draw_mpl(qnode)(inputs, weights_np)
-            fig_plain.savefig(save_dir / "quantum_circuit.png", dpi=300, bbox_inches="tight")  # type: ignore[arg-type]
-        except Exception:  # pragma: no cover
-            pass
+        if fig is not None:
+            try:
+                fig.savefig(save_dir / "quantum_circuit_decomposed.png", dpi=300, bbox_inches="tight")  # type: ignore[arg-type]
+            except Exception:
+                pass
 
 
 # Used in: ants_bees.ipynb (hybrid head), crema-d*.ipynb (hybrid head)
