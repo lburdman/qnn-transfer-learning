@@ -192,32 +192,30 @@ class AudioFeatureDataset(Dataset):
         filepaths: List of feature file paths.
         labels: Integer labels aligned with `filepaths`.
         base_model: Identifier for the backbone model family.
-        grayscale: Whether to load inputs as grayscale.
-        force_three_channels: Expand grayscale inputs to three channels when True.
     """
 
-    def __init__(self, filepaths: Sequence[str], labels: Sequence[int], base_model: str, grayscale: bool = False,
-                 force_three_channels: bool = False) -> None:
+    def __init__(self, filepaths: Sequence[str], labels: Sequence[int], base_model: str) -> None:
         super().__init__()
         self.filepaths = list(filepaths)
         self.labels = list(labels)
         self.base_model = base_model
-        self.grayscale = grayscale
-        self.force_three_channels = force_three_channels
 
-        if base_model in ["resnet18", "vgg16", "custom_cnn"]:
-            if grayscale and not force_three_channels:
-                mean, std = [0.5], [0.5]
-            else:
-                mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+        if base_model == "resnet18":
+            mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
             transform_steps: List[transforms.Compose | transforms.Normalize | transforms.Resize] = [
-                transforms.Resize((224, 224))
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean, std),
             ]
-            if grayscale:
-                num_channels = 3 if force_three_channels else 1
-                transform_steps.append(transforms.Grayscale(num_output_channels=num_channels))
-            transform_steps += [transforms.ToTensor(), transforms.Normalize(mean, std)]
             self.transform = transforms.Compose(transform_steps)
+        elif base_model == "cnn_specs":
+            # Spectrograms are assumed single-channel; keep as 1-channel tensor
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.Grayscale(num_output_channels=1),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ])
         else:
             self.transform = None
 
@@ -228,14 +226,10 @@ class AudioFeatureDataset(Dataset):
         path = self.filepaths[idx]
         label = self.labels[idx]
 
-        if self.base_model in ["resnet18", "vgg16", "custom_cnn"]:
-            img = Image.open(path)
-            img = img.convert("L") if self.grayscale and not self.force_three_channels else img.convert("RGB")
+        if self.base_model in ["resnet18", "cnn_specs"]:
+            img = Image.open(path).convert("L" if self.base_model == "cnn_specs" else "RGB")
             if self.transform:
                 img = self.transform(img)
-            # Safety: ensure channel count matches normalization expectations
-            if img.ndim == 3 and img.shape[0] == 1:
-                img = img.repeat(3, 1, 1)
             return img, label
 
         if self.base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14"]:
@@ -248,7 +242,6 @@ class AudioFeatureDataset(Dataset):
             data = np.load(path)
             key = "mfcc" if "mfcc" in data else list(data.keys())[0]
             mfcc = np.array(data[key], dtype=np.float32)
-            # Pad/trim MFCC along time axis to ensure consistent shapes
             target_len = getattr(self, "pad_mfcc_len", None)
             if target_len is not None:
                 current_len = mfcc.shape[1]
@@ -258,7 +251,6 @@ class AudioFeatureDataset(Dataset):
                 elif current_len > target_len:
                     mfcc = mfcc[:, :target_len]
             if self.base_model == "cnn_mfcc":
-                # Return as 1 x H x W tensor for CNNs
                 return torch.tensor(mfcc[None, ...], dtype=torch.float32), label
             features = mfcc.flatten()
             return torch.tensor(features, dtype=torch.float32), label
@@ -370,22 +362,14 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
         counts_per_class: Mapping of split to class-count dictionaries.
     """
     base_model = config["base_model"]
-    # Normalize aliases for clarity in notebooks (keep cnn_mfcc separate to preserve 2D MFCC handling)
-    alias_map = {
-        "cnn_specs": "resnet18",
-    }
-    base_model = alias_map.get(base_model, base_model)
     selected_classes = config["selected_classes"]
     batch_size = config["batch_size"]
-    grayscale = config["grayscale"]
-    use_pretrained = config.get("use_pretrained", False)
-    force_three_channels = bool(grayscale and use_pretrained)
 
     dataloaders: Dict[str, DataLoader] = {}
     dataset_sizes: Dict[str, int] = {}
     counts_per_class: Dict[str, Dict[str, int]] = {}
 
-    if base_model in ["resnet18", "vgg16", "custom_cnn"]:
+    if base_model in ["resnet18", "cnn_specs"]:
         root = str(config["specs_dir"])
         phases = [phase for phase in ["train", "val", "test"] if os.path.isdir(os.path.join(root, phase))]
         class_names: List[str] | None = None
@@ -401,13 +385,7 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
             ]
             files = [path for path, _ in filtered_samples]
             labels = [class_to_new_idx[ds.classes[lbl]] for _, lbl in filtered_samples]
-            dataset = AudioFeatureDataset(
-                files,
-                labels,
-                base_model,
-                grayscale=grayscale,
-                force_three_channels=force_three_channels,
-            )
+            dataset = AudioFeatureDataset(files, labels, base_model)
             dataloaders[phase] = DataLoader(
                 dataset,
                 batch_size=batch_size,
