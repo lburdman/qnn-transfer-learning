@@ -209,12 +209,12 @@ class AudioFeatureDataset(Dataset):
             ]
             self.transform = transforms.Compose(transform_steps)
         elif base_model == "cnn_specs":
-            # Spectrograms are assumed single-channel; keep as 1-channel tensor
+            # Spectrograms are assumed single-channel; replicate to 3 channels for ResNet18 compatibility
             self.transform = transforms.Compose([
                 transforms.Resize((224, 224)),
-                transforms.Grayscale(num_output_channels=1),
+                transforms.Grayscale(num_output_channels=3),
                 transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ])
         else:
             self.transform = None
