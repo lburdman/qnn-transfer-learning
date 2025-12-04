@@ -233,6 +233,9 @@ class AudioFeatureDataset(Dataset):
             img = img.convert("L") if self.grayscale and not self.force_three_channels else img.convert("RGB")
             if self.transform:
                 img = self.transform(img)
+            # Safety: ensure channel count matches normalization expectations
+            if img.ndim == 3 and img.shape[0] == 1:
+                img = img.repeat(3, 1, 1)
             return img, label
 
         if self.base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14"]:
