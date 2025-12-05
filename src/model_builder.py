@@ -88,18 +88,15 @@ class AudioEmbeddingHead(nn.Module):
 
     def __init__(self, input_dim: int, n_qubits: int, dropout: float = 0.1) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(input_dim, 512)
+        self.fc1 = nn.Linear(input_dim, 64)
         self.act1 = nn.ReLU()
-        self.dropout = nn.Dropout(dropout) if dropout and dropout > 0 else nn.Identity()
-        self.fc2 = nn.Linear(512, 64)
+        self.fc2 = nn.Linear(64, n_qubits)
         self.act2 = nn.ReLU()
-        self.fc3 = nn.Linear(64, n_qubits)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.act1(self.fc1(x))
-        x = self.dropout(x)
         x = self.act2(self.fc2(x))
-        return self.fc3(x)
+        return x
 
 
 class BackboneWithClassifier(nn.Module):
@@ -159,12 +156,18 @@ def load_backbone_checkpoint(
     Reload backbone and embedding modules from disk.
     """
     checkpoint = torch.load(checkpoint_path, map_location=map_location)
-    backbone = AudioBackboneCNN(input_channels=input_channels)
-    embedding = AudioEmbeddingHead(backbone.output_dim, n_qubits)
+    metadata = checkpoint.get("metadata", {})
+    backbone_arch = metadata.get("backbone_arch", "audio_cnn")
+    if backbone_arch == "identity":
+        backbone = nn.Identity()
+        input_dim = metadata.get("input_dim") or checkpoint["embedding"]["fc1.weight"].shape[1]
+        embedding = AudioEmbeddingHead(input_dim, n_qubits)
+    else:
+        backbone = AudioBackboneCNN(input_channels=input_channels)
+        embedding = AudioEmbeddingHead(backbone.output_dim, n_qubits)
     backbone.load_state_dict(checkpoint["backbone"])
     embedding.load_state_dict(checkpoint["embedding"])
     freeze_backbone(backbone, embedding)
-    metadata = checkpoint.get("metadata", {})
     return backbone, embedding, metadata
 
 

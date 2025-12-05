@@ -76,6 +76,7 @@ def train_with_history(
     model_dir: str,
     phases: Tuple[str, ...] | None = None,
     optimizer: optim.Optimizer | None = None,
+    early_stop_acc: float | None = None,
 ) -> Tuple[nn.Module, Dict[str, List[float]]]:
     """
     Generic training loop that logs loss/accuracy for the requested phases.
@@ -93,6 +94,12 @@ def train_with_history(
     history: Dict[str, List[float]] = {f"{phase}_loss": [] for phase in phases}
     history.update({f"{phase}_acc": [] for phase in phases})
     history.update({f"{phase}_f1": [] for phase in phases})
+    eval_phase = None
+    if early_stop_acc is not None:
+        if "test" in phases:
+            eval_phase = "test"
+        elif "val" in phases:
+            eval_phase = "val"
 
     os.makedirs(model_dir, exist_ok=True)
     model.to(device)
@@ -141,6 +148,12 @@ def train_with_history(
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())
         scheduler.step()
+
+        if early_stop_acc is not None and eval_phase is not None:
+            current_acc = history.get(f"{eval_phase}_acc", [])
+            if current_acc and current_acc[-1] >= early_stop_acc:
+                print(f"Early stopping at epoch {epoch + 1} with {eval_phase} accuracy {current_acc[-1]:.4f}")
+                break
         print()
 
     model.load_state_dict(best_model_wts)
@@ -173,13 +186,14 @@ def pretrain_backbone_and_embedding(
     representation_tag: str,
 ) -> Tuple[nn.Module, Dict[str, List[float]], str]:
     """
-    Stage 1: train CNN + embedding head end-to-end, then save the reusable backbone checkpoint.
+    Stage 1: train the embedding projector + linear classifier on precomputed embeddings.
     """
     device = resolve_device(config.device_override)
-    backbone = AudioBackboneCNN(input_channels=1, pretrained=True)
-    embedding = AudioEmbeddingHead(backbone.output_dim, config.n_qubits, dropout=config.embedding_dropout)
+    sample_inputs, _ = next(iter(dataloaders["train"]))
+    input_dim = sample_inputs.shape[1]
+    embedding = AudioEmbeddingHead(input_dim, config.n_qubits, dropout=config.embedding_dropout)
     classifier = nn.Linear(config.n_qubits, len(class_names))
-    model = BackboneWithClassifier(backbone, embedding, classifier)
+    model = nn.Sequential(embedding, classifier)
 
     model_dir = os.path.join(config.backbone_dir, representation_tag)
     model, history = train_with_history(
@@ -191,6 +205,7 @@ def pretrain_backbone_and_embedding(
         learning_rate=config.learning_rate_pretrain,
         model_dir=model_dir,
         phases=tuple(phase for phase in ("train", "test") if phase in dataloaders),
+        early_stop_acc=0.9,
     )
 
     checkpoint_path = os.path.join(config.backbone_dir, f"{representation_tag}_backbone.pt")
@@ -198,8 +213,10 @@ def pretrain_backbone_and_embedding(
         "class_names": class_names,
         "representation": representation_tag,
         "config": asdict(config),
+        "backbone_arch": "identity",
+        "input_dim": input_dim,
     }
-    save_backbone_checkpoint(backbone, embedding, checkpoint_path, metadata=metadata)
+    save_backbone_checkpoint(nn.Identity(), embedding, checkpoint_path, metadata=metadata)
     print(f"Backbone checkpoint saved to {checkpoint_path}")
     metrics_path = os.path.join(model_dir, "metrics.json")
     with open(metrics_path, "w", encoding="utf-8") as handle:
@@ -230,7 +247,13 @@ def finetune_head_only(
     embedding = embedding.to(device)
 
     if head_type == "classical":
-        head = nn.Linear(config.n_qubits, len(class_names))
+        layers: List[nn.Module] = []
+        in_dim = config.n_qubits
+        for _ in range(max(config.q_depth - 1, 0)):
+            layers.append(nn.Linear(in_dim, in_dim))
+            layers.append(nn.ReLU())
+        layers.append(nn.Linear(in_dim, len(class_names)))
+        head = nn.Sequential(*layers)
         lr = config.learning_rate_finetune_classical
     elif head_type == "quantum":
         head = build_quantum_head(config.n_qubits, len(class_names), config.q_depth)
@@ -238,6 +261,7 @@ def finetune_head_only(
     else:
         raise ValueError(f"Unsupported head type: {head_type}")
 
+    freeze_module_params(embedding)
     model = FrozenBackboneWithHead(backbone, embedding, head)
     model_dir = os.path.join(config.backbone_dir, representation_tag, f"{head_type}_finetune")
     os.makedirs(model_dir, exist_ok=True)
@@ -253,10 +277,15 @@ def finetune_head_only(
         model_dir=model_dir,
         phases=tuple(phase for phase in ("train", "test") if phase in dataloaders),
         optimizer=opt,
+        early_stop_acc=None,
     )
 
-    eval_phase = "val" if "val" in history else "test"
-    final_acc = history.get(f"{eval_phase}_acc", [0])[-1] if history.get(f"{eval_phase}_acc") else 0.0
+    if "test_acc" in history and history["test_acc"]:
+        final_acc = history["test_acc"][-1]
+    elif "val_acc" in history and history["val_acc"]:
+        final_acc = history["val_acc"][-1]
+    else:
+        final_acc = 0.0
     summary = {
         "head_type": head_type,
         "representation": representation_tag,
