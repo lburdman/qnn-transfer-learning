@@ -8,10 +8,260 @@ import glob
 import json
 import os
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.offsetbox import AnchoredText
+
+
+def safe_load_json(path: Path) -> dict | None:
+    """
+    Safely load a JSON file, returning None on failure.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: could not read {path} ({exc}). Skipping.")
+        return None
+
+
+def discover_runs(base_dir: Path) -> List[Dict[str, str]]:
+    """
+    Recursively find run folders containing metrics.json and either config.json or hyperparameters.json.
+    """
+    runs = []
+    for root, _dirs, files in os.walk(base_dir):
+        files_set = set(files)
+        has_metrics = "metrics.json" in files_set
+        has_config = "config.json" in files_set
+        has_hparams = "hyperparameters.json" in files_set
+        if has_metrics and (has_config or has_hparams):
+            run_path = Path(root)
+            rel_parts = run_path.relative_to(base_dir).parts
+            model_family = rel_parts[0] if len(rel_parts) >= 1 else "unknown"
+            variant = rel_parts[1] if len(rel_parts) >= 2 else "unknown"
+            runs.append(
+                {
+                    "model_family": model_family,
+                    "variant": variant,
+                    "run_name": run_path.name,
+                    "full_path": str(run_path),
+                }
+            )
+    return runs
+
+
+def load_metrics(run_path: Path) -> Dict[str, Any]:
+    return safe_load_json(run_path / "metrics.json") or {}
+
+
+def load_config(run_path: Path) -> Dict[str, Any]:
+    config_path = run_path / "config.json"
+    config = safe_load_json(config_path)
+    if config is not None:
+        return config
+
+    hparams_path = run_path / "hyperparameters.json"
+    hparams = safe_load_json(hparams_path)
+    if hparams is not None:
+        return hparams
+
+    return {}
+
+
+def _collect_scalar_keys(hparams_list: Iterable[dict], max_keys: int = 12) -> List[str]:
+    freq: Dict[str, int] = {}
+    for hparams in hparams_list:
+        if not isinstance(hparams, dict):
+            continue
+        for key, val in hparams.items():
+            if isinstance(val, (int, float, str, bool)) and len(str(val)) < 100:
+                freq[key] = freq.get(key, 0) + 1
+    sorted_keys = sorted(freq.items(), key=lambda kv: (-kv[1], kv[0]))
+    return [k for k, _ in sorted_keys[:max_keys]]
+
+
+def build_summary_dataframe(base_dir: Path) -> pd.DataFrame:
+    runs = discover_runs(base_dir)
+    if not runs:
+        print("No runs found. Check BASE_DIR or ensure metrics.json plus config.json or hyperparameters.json are present.")
+        return pd.DataFrame()
+
+    config_cache = {run["full_path"]: load_config(Path(run["full_path"])) for run in runs}
+    scalar_keys = _collect_scalar_keys(list(config_cache.values()))
+
+    rows = []
+    for run in runs:
+        row = run.copy()
+        cfg = config_cache.get(run["full_path"], {})
+        for key in scalar_keys:
+            row[key] = cfg.get(key)
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    sort_cols = [col for col in ["model_family", "variant", "run_name"] if col in df.columns]
+    if sort_cols:
+        df = df.sort_values(sort_cols).reset_index(drop=True)
+    return df
+
+
+def select_runs(summary_df: pd.DataFrame, indices=None, run_names=None):
+    indices = indices or []
+    run_names = run_names or []
+    mask = pd.Series(False, index=summary_df.index)
+    if indices:
+        mask |= summary_df.index.isin(indices)
+    if run_names:
+        mask |= summary_df["run_name"].isin(run_names)
+    return summary_df[mask].to_dict(orient="records")
+
+
+def plot_training_for_run(run: dict) -> None:
+    run_path = Path(run["full_path"])
+    metrics = load_metrics(run_path)
+    if not metrics:
+        print(f"No metrics found for {run_path}")
+        return
+    metrics_path = run_path / "metrics.json"
+    save_path = run_path / "training_overview.png"
+    try:
+        plot_overlapped_metrics(str(metrics_path), save_path=str(save_path))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: failed to plot {metrics_path}: {exc}")
+
+
+def plot_comparison_across_runs(
+    selected_runs,
+    task_name: str | None = None,
+    comparison_dir: Path | None = None,
+) -> None:
+    """
+    Plot comparative accuracy and loss curves for multiple runs.
+    """
+    if not selected_runs:
+        print("No runs selected for comparison.")
+        return
+
+    comparison_dir = Path(comparison_dir or "comparisons")
+    comparison_dir.mkdir(parents=True, exist_ok=True)
+
+    plt.rcParams.update(
+        {
+            "font.size": 12,
+            "axes.titlesize": 14,
+            "axes.labelsize": 12,
+            "legend.fontsize": 10,
+        }
+    )
+
+    fig, (ax_acc, ax_loss) = plt.subplots(1, 2, figsize=(18, 6), constrained_layout=True)
+
+    colors = plt.cm.tab10.colors
+    global_min_acc = 1.0
+    best_results_text = "Best Test Accuracy:\n"
+    plotted_any = False
+
+    for i, run in enumerate(selected_runs):
+        run_path = Path(run["full_path"])
+        metrics = load_metrics(run_path)
+        data = metrics.get("history", metrics)
+
+        train_acc = data.get("train_acc") or data.get("train_accs") or data.get("acc_train")
+        train_loss = data.get("train_loss") or data.get("train_losses") or data.get("loss_train")
+
+        test_acc = data.get("test_acc") or data.get("val_acc") or data.get("test_accs") or data.get("val_accs")
+        test_loss = data.get("test_loss") or data.get("val_loss") or data.get("test_losses") or data.get("val_losses")
+
+        if not test_acc:
+            print(f"Skipping {run['run_name']}: incomplete data.")
+            continue
+
+        plotted_any = True
+        epochs = range(1, len(test_acc) + 1)
+        train_epochs = range(1, len(train_acc) + 1) if train_acc else []
+
+        color = colors[i % len(colors)]
+        label_base = f"{run['variant']}"
+
+        if train_acc:
+            ax_acc.plot(train_epochs, train_acc, color=color, linestyle="--", alpha=0.65, linewidth=2)
+        ax_acc.plot(
+            epochs,
+            test_acc,
+            color=color,
+            linestyle="-",
+            marker="o",
+            markersize=5,
+            linewidth=2.4,
+            label=label_base,
+        )
+
+        current_best = max(test_acc)
+        global_min_acc = min(global_min_acc, min(test_acc))
+        best_results_text += f"- {label_base}: {current_best:.4f}\n"
+
+        if train_loss:
+            loss_train_epochs = range(1, len(train_loss) + 1)
+            ax_loss.plot(loss_train_epochs, train_loss, color=color, linestyle="--", alpha=0.65, linewidth=2)
+        if test_loss:
+            loss_test_epochs = range(1, len(test_loss) + 1)
+            ax_loss.plot(
+                loss_test_epochs,
+                test_loss,
+                color=color,
+                linestyle="-",
+                marker="o",
+                markersize=5,
+                linewidth=2.4,
+                label=label_base,
+            )
+
+    if not plotted_any:
+        print("No metrics available to plot.")
+        plt.close(fig)
+        return
+
+    title_suffix = f" on {task_name}" if task_name else ""
+
+    ax_acc.set_title(f"Accuracy Evolution{title_suffix}")
+    ax_acc.set_xlabel("Epoch")
+    ax_acc.set_ylabel("Accuracy")
+
+    bottom_limit = max(0, global_min_acc - 0.05)
+    ax_acc.set_ylim(bottom_limit, 1.02)
+
+    ax_acc.grid(True, alpha=0.25, linestyle="--")
+    ax_acc.legend(fontsize=10, frameon=True, facecolor="white", framealpha=0.85, loc="upper left")
+
+    at = AnchoredText(best_results_text.strip(), prop=dict(size=10), frameon=True, loc="lower right")
+    at.patch.set_boxstyle("round,pad=0.5,rounding_size=0.2")
+    at.patch.set_facecolor("#e8f5e9")
+    at.patch.set_edgecolor("#a5d6a7")
+    at.patch.set_alpha(0.95)
+    ax_acc.add_artist(at)
+
+    ax_loss.set_title(f"Loss Evolution{title_suffix}")
+    ax_loss.set_xlabel("Epoch")
+    ax_loss.set_ylabel("Loss")
+    ax_loss.grid(True, alpha=0.25, linestyle="--")
+
+    custom_lines = [
+        Line2D([0], [0], color="gray", lw=2.4, linestyle="-"),
+        Line2D([0], [0], color="gray", lw=2.0, linestyle="--"),
+    ]
+    ax_loss.legend(custom_lines, ["Test (Solid)", "Train (Dashed)"], loc="upper right", fontsize=10, frameon=True)
+
+    file_suffix = f"_{task_name.replace(' ', '_')}" if task_name else ""
+    save_path = comparison_dir / f"comparison_{selected_runs[-1]['variant']}{file_suffix}.png"
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"Saved Thesis Plot: {save_path}")
+    plt.show()
 
 
 # Used in: crema_d_hybrid_qnn.ipynb (metrics visualization), plots_models.ipynb (metrics visualization)
