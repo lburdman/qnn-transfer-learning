@@ -133,6 +133,7 @@ def save_backbone_checkpoint(
     embedding: nn.Module,
     checkpoint_path: str,
     metadata: Dict[str, object] | None = None,
+    classifier_state_dict: Dict[str, object] | None = None,
 ) -> None:
     """
     Persist backbone and embedding weights for reuse during fine-tuning.
@@ -143,6 +144,8 @@ def save_backbone_checkpoint(
         "embedding": embedding.state_dict(),
         "metadata": metadata or {},
     }
+    if classifier_state_dict is not None:
+        payload["classifier"] = classifier_state_dict
     torch.save(payload, checkpoint_path)
 
 

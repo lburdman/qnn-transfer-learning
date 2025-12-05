@@ -23,6 +23,7 @@ from src.model_builder import (
     AudioEmbeddingHead,
     BackboneWithClassifier,
     FrozenBackboneWithHead,
+    build_quantum_layer,
     build_quantum_head,
     load_backbone_checkpoint,
     save_backbone_checkpoint,
@@ -216,7 +217,7 @@ def pretrain_backbone_and_embedding(
         "backbone_arch": "identity",
         "input_dim": input_dim,
     }
-    save_backbone_checkpoint(nn.Identity(), embedding, checkpoint_path, metadata=metadata)
+    save_backbone_checkpoint(nn.Identity(), embedding, checkpoint_path, metadata=metadata, classifier_state_dict=classifier.state_dict())
     print(f"Backbone checkpoint saved to {checkpoint_path}")
     metrics_path = os.path.join(model_dir, "metrics.json")
     with open(metrics_path, "w", encoding="utf-8") as handle:
@@ -237,6 +238,8 @@ def finetune_head_only(
     Stage 2: freeze backbone+embedding and train only the selected head (classical or quantum).
     """
     device = resolve_device(config.device_override)
+    checkpoint_blob = torch.load(checkpoint_path, map_location=device)
+    classifier_state = checkpoint_blob.get("classifier")
     backbone, embedding, metadata = load_backbone_checkpoint(
         checkpoint_path,
         input_channels=1,
@@ -250,13 +253,28 @@ def finetune_head_only(
         layers: List[nn.Module] = []
         in_dim = config.n_qubits
         for _ in range(max(config.q_depth - 1, 0)):
-            layers.append(nn.Linear(in_dim, in_dim))
+            lin = nn.Linear(in_dim, in_dim)
+            nn.init.eye_(lin.weight)
+            lin.weight.data += 0.01 * torch.randn_like(lin.weight)
+            nn.init.zeros_(lin.bias)
+            layers.append(lin)
             layers.append(nn.ReLU())
-        layers.append(nn.Linear(in_dim, len(class_names)))
+        final_linear = nn.Linear(in_dim, len(class_names))
+        if classifier_state:
+            with torch.no_grad():
+                final_linear.weight.copy_(classifier_state["weight"])
+                final_linear.bias.copy_(classifier_state["bias"])
+        layers.append(final_linear)
         head = nn.Sequential(*layers)
         lr = config.learning_rate_finetune_classical
     elif head_type == "quantum":
-        head = build_quantum_head(config.n_qubits, len(class_names), config.q_depth)
+        qlayer = build_quantum_layer(config.n_qubits, config.q_depth)
+        final_linear = nn.Linear(config.n_qubits, len(class_names))
+        if classifier_state:
+            with torch.no_grad():
+                final_linear.weight.copy_(classifier_state["weight"])
+                final_linear.bias.copy_(classifier_state["bias"])
+        head = nn.Sequential(qlayer, final_linear)
         lr = config.learning_rate_finetune_quantum
     else:
         raise ValueError(f"Unsupported head type: {head_type}")
