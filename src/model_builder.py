@@ -240,6 +240,45 @@ def build_quantum_head(n_qubits: int, n_classes: int, q_depth: int):
     return qml.qnn.TorchLayer(qnode, weight_shapes)
 
 
+def _build_classifier_head(
+    in_features: int,
+    n_classes: int,
+    quantum: bool,
+    n_qubits: int,
+    q_depth: int,
+    classical_model: str,
+    intermediate_dim: int = 512,
+) -> nn.Module:
+    """Helper to attach the correct generic head."""
+    if quantum:
+        qlayer = build_quantum_layer(n_qubits, q_depth)
+        return nn.Sequential(
+            nn.Linear(in_features, n_qubits),
+            nn.ReLU(),
+            qlayer,
+            nn.Linear(n_qubits, n_classes),
+        )
+    
+    if classical_model == "512_2":
+        return nn.Linear(in_features, n_classes)
+    elif classical_model == "512_nq_2":
+        return nn.Sequential(
+            nn.Linear(in_features, intermediate_dim),
+            nn.ReLU(),
+            nn.Linear(intermediate_dim, n_qubits),
+            nn.ReLU(),
+            nn.Linear(n_qubits, n_classes),
+        )
+    elif classical_model == "551_512_2":
+        return nn.Sequential(
+            nn.Linear(in_features, 512),
+            nn.ReLU(),
+            nn.Linear(512, n_classes),
+        )
+    else:
+        raise ValueError(f"Unsupported classical_model: {classical_model}")
+
+
 # Used in: crema_d_hybrid_qnn.ipynb (model assembly)
 def build_model(config: Dict[str, object], class_names: Sequence[str], dataloaders: Dict[str, DataLoader], device):
     """
@@ -263,7 +302,6 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
     classical_model = config["classical_model"]
     n_qubits = config["n_qubits"]
     q_depth = config["q_depth"]
-    # grayscale = config["grayscale"]
     n_classes = len(class_names)
 
     model = None
@@ -271,160 +309,36 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
         input_channels = 1 
         backbone = create_custom_cnn(input_channels=input_channels)
         feature_dim = getattr(backbone, "output_dim", 512)
-        if quantum:
-            qlayer = build_quantum_layer(n_qubits, q_depth)
-            head = nn.Sequential(
-                nn.Linear(feature_dim, n_qubits),
-                nn.ReLU(),
-                qlayer,
-                nn.Linear(n_qubits, n_classes),
-            )
-        else:
-            if classical_model == "512_2":
-                head = nn.Linear(feature_dim, n_classes)
-            elif classical_model == "512_nq_2":
-                head = nn.Sequential(
-                    nn.Linear(feature_dim, n_qubits),
-                    nn.ReLU(),
-                    nn.Linear(n_qubits, n_qubits),
-                    nn.ReLU(),
-                    nn.Linear(n_qubits, n_classes),
-                )
-            elif classical_model == "551_512_2":
-                head = nn.Sequential(
-                    nn.Linear(feature_dim, 512),
-                    nn.ReLU(),
-                    nn.Linear(512, n_classes),
-                )
-            else:
-                raise ValueError(f"Unsupported classifier for custom_cnn: {classical_model}")
+        head = _build_classifier_head(feature_dim, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits)
         model = nn.Sequential(backbone, head)
 
     elif base_model == "resnet18":
         model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
         in_features = model.fc.in_features
-        if quantum:
-            qlayer = build_quantum_layer(n_qubits, q_depth)
-            model.fc = nn.Sequential(
-                nn.Linear(in_features, n_qubits),
-                nn.ReLU(),
-                qlayer,
-                nn.Linear(n_qubits, n_classes),
-            )
-        else:
-            if classical_model == "512_2":
-                model.fc = nn.Linear(in_features, n_classes)
-            elif classical_model == "512_nq_2":
-                model.fc = nn.Sequential(
-                    nn.Linear(in_features, n_qubits),
-                    nn.ReLU(),
-                    nn.Linear(n_qubits, n_qubits),
-                    nn.ReLU(),
-                    nn.Linear(n_qubits, n_classes),
-                )
-            elif classical_model == "551_512_2":
-                model.fc = nn.Sequential(
-                    nn.Linear(in_features, 512),
-                    nn.ReLU(),
-                    nn.Linear(512, n_classes),
-                )
+        model.fc = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits)
 
     elif base_model == "vgg16":
         model = torchvision.models.vgg16(weights=VGG16_Weights.DEFAULT)
         in_features = model.classifier[6].in_features
-        if quantum:
-            qlayer = build_quantum_layer(n_qubits, q_depth)
-            model.classifier[6] = nn.Sequential(
-                nn.Linear(in_features, n_qubits),
-                nn.ReLU(),
-                qlayer,
-                nn.Linear(n_qubits, n_classes),
-            )
-        else:
-            if classical_model == "512_2":
-                model.classifier[6] = nn.Linear(in_features, n_classes)
-            elif classical_model == "512_nq_2":
-                model.classifier[6] = nn.Sequential(
-                    nn.Linear(in_features, 512),
-                    nn.ReLU(),
-                    nn.Linear(512, n_qubits),
-                    nn.ReLU(),
-                    nn.Linear(n_qubits, n_classes),
-                )
-            elif classical_model == "551_512_2":
-                model.classifier[6] = nn.Sequential(
-                    nn.Linear(in_features, 512),
-                    nn.ReLU(),
-                    nn.Linear(512, n_classes),
-                )
+        model.classifier[6] = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=512)
 
     elif base_model == "cnn_mfcc":
         # Treat MFCC as a 1-channel image and use a ResNet backbone
         model = torchvision.models.resnet18(weights=None)
         model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         in_features = model.fc.in_features
-        if quantum:
-            qlayer = build_quantum_layer(n_qubits, q_depth)
-            model.fc = nn.Sequential(
-                nn.Linear(in_features, n_qubits),
-                nn.ReLU(),
-                qlayer,
-                nn.Linear(n_qubits, n_classes),
-            )
-        else:
-            model.fc = nn.Sequential(
-                nn.Linear(in_features, 512),
-                nn.ReLU(),
-                nn.Linear(512, n_classes),
-            )
+        model.fc = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, "551_512_2")
 
     elif base_model == "cnn_specs":
         # Spectrogram PNGs treated as 3-channel images, ResNet18 from scratch
         model = torchvision.models.resnet18(weights=None)
         in_features = model.fc.in_features
-        if quantum:
-            qlayer = build_quantum_layer(n_qubits, q_depth)
-            model.fc = nn.Sequential(
-                nn.Linear(in_features, n_qubits),
-                nn.ReLU(),
-                qlayer,
-                nn.Linear(n_qubits, n_classes),
-            )
-        else:
-            model.fc = nn.Sequential(
-                nn.Linear(in_features, 512),
-                nn.ReLU(),
-                nn.Linear(512, n_classes),
-            )
+        model.fc = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, "551_512_2")
 
     elif base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14"]:
         sample_inputs, _ = next(iter(dataloaders["train"]))
         input_dim = sample_inputs.shape[1] if sample_inputs.ndim > 1 else sample_inputs.numel()
-        if quantum:
-            qlayer = build_quantum_layer(n_qubits, q_depth)
-            model = nn.Sequential(
-                nn.Linear(input_dim, n_qubits),
-                nn.ReLU(),
-                qlayer,
-                nn.Linear(n_qubits, n_classes),
-            )
-        else:
-            if classical_model == "512_2":
-                model = nn.Linear(input_dim, n_classes)
-            elif classical_model == "512_nq_2":
-                model = nn.Sequential(
-                    nn.Linear(input_dim, n_qubits),
-                    nn.ReLU(),
-                    nn.Linear(n_qubits, n_qubits),
-                    nn.ReLU(),
-                    nn.Linear(n_qubits, n_classes),
-                )
-            elif classical_model == "551_512_2":
-                model = nn.Sequential(
-                    nn.Linear(input_dim, 512),
-                    nn.ReLU(),
-                    nn.Linear(512, n_classes),
-                )
+        model = _build_classifier_head(input_dim, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits)
     else:
         raise ValueError(f"Unsupported base_model: {base_model}")
 
