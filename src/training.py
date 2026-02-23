@@ -134,12 +134,14 @@ def train_with_history(
 
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)
-                all_preds.extend(preds.detach().cpu().tolist())
-                all_labels.extend(labels.detach().cpu().tolist())
+                all_preds.append(preds.detach().cpu())
+                all_labels.append(labels.detach().cpu())
 
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
-            epoch_f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
+            all_preds_cat = torch.cat(all_preds).numpy()
+            all_labels_cat = torch.cat(all_labels).numpy()
+            epoch_f1 = f1_score(all_labels_cat, all_preds_cat, average="weighted", zero_division=0)
             history[f"{phase}_loss"].append(epoch_loss)
             history[f"{phase}_acc"].append(epoch_acc.item())
             history[f"{phase}_f1"].append(epoch_f1)
@@ -373,12 +375,12 @@ def freeze_module_params(module: nn.Module) -> None:
         param.requires_grad = False
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (canonical training loop)
 def train_model(model: nn.Module, dataloaders: Dict[str, torch.utils.data.DataLoader],
                 dataset_sizes: Dict[str, int], device, num_epochs: int, learning_rate: float,
                 model_dir: str) -> Tuple[nn.Module, Dict[str, list]]:
     """
     Train a model using AdamW and StepLR, saving the best checkpoint to disk.
+    Legacy alias pointing to train_with_history.
 
     Args:
         model: Model to train.
@@ -392,72 +394,18 @@ def train_model(model: nn.Module, dataloaders: Dict[str, torch.utils.data.DataLo
     Returns:
         Tuple containing the trained model and a history dictionary.
     """
-    criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(filter(lambda param: param.requires_grad, model.parameters()), lr=learning_rate)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
-    best_model_wts = model.state_dict()
-    best_acc = 0.0
-    history = {"train_loss": [], "train_acc": [], "train_f1": [], "test_loss": [], "test_acc": [], "test_f1": []}
-
-    for epoch in range(num_epochs):
-        print(f"Epoch {epoch + 1}/{num_epochs}")
-        print("-" * 30)
-        for phase in ["train", "test"]:
-            if phase not in dataloaders:
-                continue
-            if phase == "train":
-                model.train()
-            else:
-                model.eval()
-            running_loss = 0.0
-            running_corrects = 0
-            dataloader = dataloaders[phase]
-            all_preds, all_labels = [], []
-            for inputs, labels in tqdm(dataloader, desc=f"{phase} {epoch + 1}/{num_epochs}", leave=False):
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-                optimizer.zero_grad()
-                with torch.set_grad_enabled(phase == "train"):
-                    outputs = model(inputs)
-                    _, preds = torch.max(outputs, 1)
-                    loss = criterion(outputs, labels)
-                    if phase == "train":
-                        loss.backward()
-                        optimizer.step()
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
-                all_preds.extend(preds.detach().cpu().tolist())
-                all_labels.extend(labels.detach().cpu().tolist())
-            epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects.double() / dataset_sizes[phase]
-            epoch_f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
-            history[f"{phase}_loss"].append(epoch_loss)
-            history[f"{phase}_acc"].append(epoch_acc.item())
-            history[f"{phase}_f1"].append(epoch_f1)
-            print(f"{phase} Loss: {epoch_loss:.4f}  Acc: {epoch_acc:.4f}  F1: {epoch_f1:.4f}")
-            if phase == "test" and epoch_acc > best_acc:
-                best_acc = epoch_acc
-                best_model_wts = model.state_dict()
-        scheduler.step()
-        print()
-
-    print(f"Training complete. Best test accuracy: {best_acc:.4f}")
-    model.load_state_dict(best_model_wts)
-    model_path = os.path.join(model_dir, "model.pt")
-    torch.save(model.state_dict(), model_path)
-    metrics = {
-        "history": history,
-        "best_train_acc": max(history.get("train_acc", [0])) if history.get("train_acc") else 0,
-        "best_test_acc": max(history.get("test_acc", [0])) if history.get("test_acc") else 0,
-        "best_train_f1": max(history.get("train_f1", [0])) if history.get("train_f1") else 0,
-        "best_test_f1": max(history.get("test_f1", [0])) if history.get("test_f1") else 0,
-    }
-    with open(os.path.join(model_dir, "history.json"), "w", encoding="utf-8") as handle:
-        json.dump(history, handle, indent=4)
-    with open(os.path.join(model_dir, "metrics.json"), "w", encoding="utf-8") as handle:
-        json.dump(metrics, handle, indent=4)
-    print(f"Model saved to {model_path}")
-    return model, history
+    return train_with_history(
+        model=model,
+        dataloaders=dataloaders,
+        dataset_sizes=dataset_sizes,
+        device=device,
+        num_epochs=num_epochs,
+        learning_rate=learning_rate,
+        model_dir=model_dir,
+        phases=tuple(phase for phase in ("train", "test") if phase in dataloaders),
+        optimizer=optimizer,
+    )
 
 # Used in: crema_d_hybrid_qnn.ipynb (evaluation and confusion matrix)
 def evaluate_model(model: nn.Module, dataloader, class_names, device, model_dir: str,
