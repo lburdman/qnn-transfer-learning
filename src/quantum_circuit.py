@@ -180,19 +180,17 @@ def analyze_trained_quantum_head(
                 pass
 
 
-# Used in: ants_bees.ipynb (hybrid head), crema-d*.ipynb (hybrid head)
-class Quantumnet(nn.Module):
+class BaseHybridHead(nn.Module):
     """
-    Hybrid quantum-classical head that wraps a PennyLane QNode.
+    Base class for hybrid quantum-classical heads using a parameterized QNode.
     """
-
-    def __init__(self, n_qubits: int, q_depth: int, max_layers: int, q_delta: float, dev, n_classes: int = 2,
-                 base_model: str = "resnet18") -> None:
+    def __init__(self, n_qubits: int, q_depth: int, max_layers: int, q_delta: float, dev,
+                 qnode_func, n_classes: int = 2, base_model: str = "resnet18") -> None:
         super().__init__()
         self.n_qubits = n_qubits
         self.q_depth = q_depth
         self.max_layers = max_layers
-        self.q_net = build_qnode(n_qubits, q_depth, max_layers, dev)
+        self.q_net = qnode_func(n_qubits, q_depth, max_layers, dev)
 
         if base_model == "resnet18":
             self.pre_net = nn.Linear(512, n_qubits)
@@ -211,11 +209,21 @@ class Quantumnet(nn.Module):
     def forward(self, input_features: torch.Tensor) -> torch.Tensor:
         pre_out = self.pre_net(input_features)
         q_in = torch.tanh(pre_out) * np.pi / 2.0
-        q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
-        for elem in q_in:
-            q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float().unsqueeze(0)
-        q_out = torch.cat((q_out, q_out_elem))
+        
+        q_outs = [torch.stack(self.q_net(elem, self.q_params)).float() for elem in q_in]
+        q_out = torch.stack(q_outs)
+        
         return self.post_net(q_out)
+
+
+# Used in: ants_bees.ipynb (hybrid head), crema-d*.ipynb (hybrid head)
+class Quantumnet(BaseHybridHead):
+    """
+    Hybrid quantum-classical head that wraps a PennyLane QNode.
+    """
+    def __init__(self, n_qubits: int, q_depth: int, max_layers: int, q_delta: float, dev, n_classes: int = 2,
+                 base_model: str = "resnet18") -> None:
+        super().__init__(n_qubits, q_depth, max_layers, q_delta, dev, build_qnode, n_classes, base_model)
 
 
 # Used in: src.quantum_circuit.build_qnode2 (feature map)
@@ -279,41 +287,13 @@ def build_qnode2(n_qubits: int, q_depth: int, max_layers: int, dev) -> qml.QNode
 
 
 # Used in: crema-d-enhanced.ipynb (enhanced hybrid head)
-class DressedQuantumCircuit(nn.Module):
+class DressedQuantumCircuit(BaseHybridHead):
     """
     Hybrid quantum-classical head using the enhanced QNode with feature maps.
     """
-
     def __init__(self, n_qubits: int, q_depth: int, max_layers: int, q_delta: float, dev, n_classes: int = 2,
                  base_model: str = "resnet18") -> None:
-        super().__init__()
-        self.n_qubits = n_qubits
-        self.q_depth = q_depth
-        self.max_layers = max_layers
-        self.q_net = build_qnode2(n_qubits, q_depth, max_layers, dev)
-
-        if base_model == "resnet18":
-            self.pre_net = nn.Linear(512, n_qubits)
-        elif base_model == "vgg16":
-            self.pre_net = nn.Sequential(
-                nn.Linear(4096, 512),
-                nn.ReLU(),
-                nn.Linear(512, n_qubits),
-            )
-        else:
-            self.pre_net = nn.Linear(4096, n_qubits)
-
-        self.q_params = nn.Parameter(q_delta * torch.randn(max_layers * n_qubits))
-        self.post_net = nn.Linear(n_qubits, n_classes)
-
-    def forward(self, input_features: torch.Tensor) -> torch.Tensor:
-        pre_out = self.pre_net(input_features)
-        q_in = torch.tanh(pre_out) * np.pi / 2.0
-        q_out = torch.zeros((0, self.n_qubits), device=input_features.device)
-        for elem in q_in:
-            q_out_elem = torch.stack(self.q_net(elem, self.q_params)).float().unsqueeze(0)
-        q_out = torch.cat((q_out, q_out_elem))
-        return self.post_net(q_out)
+        super().__init__(n_qubits, q_depth, max_layers, q_delta, dev, build_qnode2, n_classes, base_model)
     
 # Handy helper to visualize the qnode defined above (templated and decomposed views)
 def draw_qnode_circuit_example(
