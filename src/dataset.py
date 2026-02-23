@@ -200,6 +200,15 @@ class AudioFeatureDataset(Dataset):
         self.labels = list(labels)
         self.base_model = base_model
 
+        self.is_image = base_model in ["resnet18", "cnn_specs"]
+        self.is_embedding = base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14"]
+        self.is_mfcc = base_model in ["mfcc", "cnn_mfcc"]
+        self.is_cnn_mfcc = (base_model == "cnn_mfcc")
+        self.is_cnn_specs = (base_model == "cnn_specs")
+
+        if not (self.is_image or self.is_embedding or self.is_mfcc):
+            raise ValueError(f"Unsupported base_model: {self.base_model}")
+
         if base_model == "resnet18":
             mean, std = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
             transform_steps: List[transforms.Compose | transforms.Normalize | transforms.Resize] = [
@@ -226,19 +235,19 @@ class AudioFeatureDataset(Dataset):
         path = self.filepaths[idx]
         label = self.labels[idx]
 
-        if self.base_model in ["resnet18", "cnn_specs"]:
-            img = Image.open(path).convert("L" if self.base_model == "cnn_specs" else "RGB")
+        if self.is_image:
+            img = Image.open(path).convert("L" if self.is_cnn_specs else "RGB")
             if self.transform:
                 img = self.transform(img)
             return img, label
 
-        if self.base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14"]:
+        if self.is_embedding:
             data = np.load(path)
             key = "embedding" if "embedding" in data else list(data.keys())[0]
             embedding = np.array(data[key], dtype=np.float32)
             return torch.tensor(embedding, dtype=torch.float32), label
 
-        if self.base_model in ["mfcc", "cnn_mfcc"]:
+        if self.is_mfcc:
             data = np.load(path)
             key = "mfcc" if "mfcc" in data else list(data.keys())[0]
             mfcc = np.array(data[key], dtype=np.float32)
@@ -250,12 +259,12 @@ class AudioFeatureDataset(Dataset):
                     mfcc = np.pad(mfcc, pad_width, mode="constant")
                 elif current_len > target_len:
                     mfcc = mfcc[:, :target_len]
-            if self.base_model == "cnn_mfcc":
+            if self.is_cnn_mfcc:
                 return torch.tensor(mfcc[None, ...], dtype=torch.float32), label
             features = mfcc.flatten()
             return torch.tensor(features, dtype=torch.float32), label
-
-        raise ValueError(f"Unsupported base_model: {self.base_model}")
+            
+        raise RuntimeError("Unreachable")
 
 
 class CREMADWaveformDataset(Dataset):
