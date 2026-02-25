@@ -196,18 +196,26 @@ class FrozenBackboneWithHead(nn.Module):
 
 
 # Used in: crema_d_hybrid_qnn.ipynb (quantum layer construction)
-def build_quantum_layer(n_qubits: int, q_depth: int):
+def build_quantum_layer(
+    n_qubits: int,
+    q_depth: int,
+    quantum_device: str = "default.qubit",
+    quantum_device_kwargs: dict | None = None,
+):
     """
     Build a PennyLane TorchLayer with AngleEmbedding and BasicEntanglerLayers.
 
     Args:
         n_qubits: Number of qubits.
         q_depth: Depth of the entangler layers.
+        quantum_device: The PennyLane device name (e.g., "default.qubit").
+        quantum_device_kwargs: Additional kwargs for the device.
 
     Returns:
         TorchLayer wrapping the defined quantum circuit.
     """
-    dev = qml.device("default.qubit", wires=n_qubits)
+    kwargs = quantum_device_kwargs or {}
+    dev = qml.device(quantum_device, wires=n_qubits, **kwargs)
 
     @qml.qnode(dev)
     def circuit(inputs, weights):
@@ -219,7 +227,13 @@ def build_quantum_layer(n_qubits: int, q_depth: int):
     return qml.qnn.TorchLayer(circuit, weight_shapes)
 
 
-def build_quantum_head(n_qubits: int, n_classes: int, q_depth: int):
+def build_quantum_head(
+    n_qubits: int,
+    n_classes: int,
+    q_depth: int,
+    quantum_device: str = "default.qubit",
+    quantum_device_kwargs: dict | None = None,
+):
     """
     Build a PennyLane TorchLayer that outputs class logits directly.
 
@@ -227,8 +241,11 @@ def build_quantum_head(n_qubits: int, n_classes: int, q_depth: int):
         n_qubits: Number of qubits (and input dimension).
         n_classes: Number of output classes.
         q_depth: Depth of entangling layers.
+        quantum_device: The PennyLane device name (e.g., "default.qubit").
+        quantum_device_kwargs: Additional kwargs for the device.
     """
-    dev = qml.device("default.qubit", wires=n_qubits)
+    kwargs = quantum_device_kwargs or {}
+    dev = qml.device(quantum_device, wires=n_qubits, **kwargs)
 
     @qml.qnode(dev)
     def qnode(inputs, weights):
@@ -248,10 +265,17 @@ def _build_classifier_head(
     q_depth: int,
     classical_model: str,
     intermediate_dim: int = 512,
+    quantum_device: str = "default.qubit",
+    quantum_device_kwargs: dict | None = None,
 ) -> nn.Module:
     """Helper to attach the correct generic head."""
     if quantum:
-        qlayer = build_quantum_layer(n_qubits, q_depth)
+        qlayer = build_quantum_layer(
+            n_qubits,
+            q_depth,
+            quantum_device=quantum_device,
+            quantum_device_kwargs=quantum_device_kwargs,
+        )
         return nn.Sequential(
             nn.Linear(in_features, n_qubits),
             nn.ReLU(),
@@ -280,7 +304,14 @@ def _build_classifier_head(
 
 
 # Used in: crema_d_hybrid_qnn.ipynb (model assembly)
-def build_model(config: Dict[str, object], class_names: Sequence[str], dataloaders: Dict[str, DataLoader], device):
+def build_model(
+    config: Dict[str, object],
+    class_names: Sequence[str],
+    dataloaders: Dict[str, DataLoader],
+    device,
+    quantum_device: str = "default.qubit",
+    quantum_device_kwargs: dict | None = None,
+):
     """
     Assemble a classical or quantum-hybrid model based on configuration.
 
@@ -289,6 +320,8 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
         class_names: Ordered list of class labels.
         dataloaders: Mapping of phase to DataLoader (used to infer embedding shapes).
         device: Torch device.
+        quantum_device: Simulator or remote QPU identifier for PennyLane binding.
+        quantum_device_kwargs: Additional arguments for initializing the remote QPU device.
 
     Returns:
         Configured model moved to the specified device.
@@ -309,36 +342,54 @@ def build_model(config: Dict[str, object], class_names: Sequence[str], dataloade
         input_channels = 1 
         backbone = create_custom_cnn(input_channels=input_channels)
         feature_dim = getattr(backbone, "output_dim", 512)
-        head = _build_classifier_head(feature_dim, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits)
+        head = _build_classifier_head(
+            feature_dim, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits,
+            quantum_device=quantum_device, quantum_device_kwargs=quantum_device_kwargs
+        )
         model = nn.Sequential(backbone, head)
 
     elif base_model == "resnet18":
         model = torchvision.models.resnet18(weights=ResNet18_Weights.DEFAULT)
         in_features = model.fc.in_features
-        model.fc = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits)
+        model.fc = _build_classifier_head(
+            in_features, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits,
+            quantum_device=quantum_device, quantum_device_kwargs=quantum_device_kwargs
+        )
 
     elif base_model == "vgg16":
         model = torchvision.models.vgg16(weights=VGG16_Weights.DEFAULT)
         in_features = model.classifier[6].in_features
-        model.classifier[6] = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=512)
+        model.classifier[6] = _build_classifier_head(
+            in_features, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=512,
+            quantum_device=quantum_device, quantum_device_kwargs=quantum_device_kwargs
+        )
 
     elif base_model == "cnn_mfcc":
         # Treat MFCC as a 1-channel image and use a ResNet backbone
         model = torchvision.models.resnet18(weights=None)
         model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         in_features = model.fc.in_features
-        model.fc = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, "551_512_2")
+        model.fc = _build_classifier_head(
+            in_features, n_classes, quantum, n_qubits, q_depth, "551_512_2",
+            quantum_device=quantum_device, quantum_device_kwargs=quantum_device_kwargs
+        )
 
     elif base_model == "cnn_specs":
         # Spectrogram PNGs treated as 3-channel images, ResNet18 from scratch
         model = torchvision.models.resnet18(weights=None)
         in_features = model.fc.in_features
-        model.fc = _build_classifier_head(in_features, n_classes, quantum, n_qubits, q_depth, "551_512_2")
+        model.fc = _build_classifier_head(
+            in_features, n_classes, quantum, n_qubits, q_depth, "551_512_2",
+            quantum_device=quantum_device, quantum_device_kwargs=quantum_device_kwargs
+        )
 
     elif base_model in ["emb_resnet18", "emb_vgg16", "emb_panns_cnn14"]:
         sample_inputs, _ = next(iter(dataloaders["train"]))
         input_dim = sample_inputs.shape[1] if sample_inputs.ndim > 1 else sample_inputs.numel()
-        model = _build_classifier_head(input_dim, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits)
+        model = _build_classifier_head(
+            input_dim, n_classes, quantum, n_qubits, q_depth, classical_model, intermediate_dim=n_qubits,
+            quantum_device=quantum_device, quantum_device_kwargs=quantum_device_kwargs
+        )
     else:
         raise ValueError(f"Unsupported base_model: {base_model}")
 
