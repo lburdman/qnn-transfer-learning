@@ -65,11 +65,15 @@ def extract_quantum_weights(model_or_state_dict: nn.Module | dict) -> dict[str, 
         if qlayer is None:
             raise ValueError("Quantum layer not found in the provided model.")
 
-        try:
-            from src.quantum_circuit import BaseHybridHead
+        if 'BaseHybridHead' in globals():
+            BaseHybridHead = globals()['BaseHybridHead']
             is_base_hybrid = isinstance(qlayer, BaseHybridHead)
-        except ImportError:
-            is_base_hybrid = False
+        else:
+            try:
+                from src.quantum_circuit import BaseHybridHead
+                is_base_hybrid = isinstance(qlayer, BaseHybridHead)
+            except ImportError:
+                is_base_hybrid = False
 
         if is_base_hybrid:
             return {"q_params": qlayer.q_params.detach()}
@@ -332,3 +336,135 @@ def draw_quantum_circuit_from_model(model: nn.Module, dummy_input: torch.Tensor 
         return
         
     raise ValueError("Could not extract weights to draw the circuit.")
+
+
+import os
+import json
+import numpy as np
+
+def extract_quantum_inputs(model: nn.Module, sample_input: torch.Tensor, device: torch.device | None = None) -> torch.Tensor | None:
+    """
+    Passes a sample input through the model and extracts the exact tensor 
+    that is fed into the quantum layer using a forward pre-hook.
+
+    Args:
+        model: The hybrid PyTorch model.
+        sample_input: A validation tensor/batch to run through the model.
+        device: The device to run the extraction on. If None, infers from sample_input.
+
+    Returns:
+        torch.Tensor | None: The detached, CPU-bound numpy-ready tensor that inputs to the quantum circuit.
+    """
+    qlayer = find_quantum_layer(model)
+    if qlayer is None:
+        raise ValueError("No quantum layer found in the model.")
+
+    if device is None:
+        device = sample_input.device
+
+    model = model.to(device)
+    sample_input = sample_input.to(device)
+    
+    # We use a mutable list to store the hooked input
+    captured_input = []
+
+    def hook_fn(module, args):
+        # args is a tuple of inputs to the forward pass. Usually args[0] is the main tensor.
+        captured_input.append(args[0].detach().cpu())
+
+    # Register the hook
+    handle = qlayer.register_forward_pre_hook(hook_fn)
+
+    try:
+        # We don't need the final output or gradients
+        with torch.no_grad():
+            model(sample_input)
+    finally:
+        # Always remove the hook to avoid memory leaks or side effects
+        handle.remove()
+
+    if captured_input:
+        return captured_input[0]
+    return None
+
+
+def export_quantum_artifacts(model: nn.Module, sample_input: torch.Tensor | None = None, save_dir: str | None = None) -> dict:
+    """
+    Aggregates quantum weights, metadata, and (optionally) real inputs into a dictionary,
+    and optionally saves them to a directory for hardware downstream execution.
+
+    Args:
+        model: The hybrid PyTorch model.
+        sample_input: Optional validation tensor to extract real quantum circuit inputs.
+        save_dir: Optional directory to save the artifacts to disk.
+
+    Returns:
+        dict: A dictionary containing 'metadata', 'weights', and 'inputs'.
+    """
+    artifacts = {
+        "metadata": {},
+        "weights": {},
+        "inputs": None
+    }
+
+    # 1. Summarize and infer metadata
+    try:
+        weights_summary = summarize_quantum_weights(model)
+        metadata = infer_quantum_metadata(model)
+        
+        # Add shape boundaries to metadata for convenience
+        metadata["weights_summary"] = weights_summary
+        
+        # Check classical mapper
+        mapper = find_classical_to_quantum_mapper(model)
+        mapper_info = "None"
+        if mapper is not None:
+            mapper_info = f"{mapper.__class__.__name__}(in_features={getattr(mapper, 'in_features', '?')}, out_features={getattr(mapper, 'out_features', '?')})"
+        metadata["classical_mapper"] = mapper_info
+        
+        artifacts["metadata"] = metadata
+    except Exception as e:
+        artifacts["metadata"]["error"] = f"Failed to infer metadata: {e}"
+
+    # 2. Extract actual weights
+    try:
+        raw_weights = extract_quantum_weights(model)
+        for k, v in raw_weights.items():
+            try:
+                artifacts["weights"][k] = v.detach().cpu().numpy()
+            except RuntimeError:
+                # Fallback for PyTorch vs numpy version incompatibilities (e.g. PyTorch 2.2 vs NumPy 2.x)
+                artifacts["weights"][k] = np.array(v.detach().cpu().tolist())
+    except Exception as e:
+        print(f"Warning: Failed to extract quantum weights: {e}")
+
+    # 3. Extract real inputs if a sample was provided
+    if sample_input is not None:
+        try:
+            q_inputs = extract_quantum_inputs(model, sample_input)
+            if q_inputs is not None:
+                try:
+                    artifacts["inputs"] = q_inputs.numpy()
+                except RuntimeError:
+                    artifacts["inputs"] = np.array(q_inputs.tolist())
+        except Exception as e:
+            print(f"Warning: Failed to extract quantum inputs: {e}")
+
+    # 4. Save to disk if requested
+    if save_dir is not None:
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Save Metadata (JSON)
+        if artifacts["metadata"]:
+            with open(os.path.join(save_dir, "quantum_metadata.json"), "w") as f:
+                json.dump(artifacts["metadata"], f, indent=2)
+                
+        # Save Weights (NPZ)
+        if artifacts["weights"]:
+            np.savez(os.path.join(save_dir, "quantum_weights.npz"), **artifacts["weights"])
+            
+        # Save Inputs (NPY)
+        if artifacts["inputs"] is not None:
+            np.save(os.path.join(save_dir, "quantum_inputs.npy"), artifacts["inputs"])
+            
+    return artifacts
