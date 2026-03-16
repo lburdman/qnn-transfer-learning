@@ -9,3 +9,18 @@ __pycache__/
 *.idx3-ubyte
 *.pdf
 *.zip
+
+# Virtual Environments
+.venv/
+venv/
+env/
+.env/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Python caching
+*.pyc
+.pytest_cache/
