@@ -161,3 +161,143 @@ def find_classical_to_quantum_mapper(model: nn.Module) -> nn.Module | None:
                             return children[j]
 
     return None
+
+def infer_quantum_metadata(model: nn.Module) -> dict[str, int]:
+    """
+    Infer n_qubits and q_depth from the model's quantum layer weights.
+    
+    Args:
+        model (nn.Module): The full hybrid model.
+        
+    Returns:
+        dict: A dictionary containing 'n_qubits' and 'q_depth'.
+        
+    Raises:
+        ValueError: If the metadata cannot be inferred.
+    """
+    summary = summarize_quantum_weights(model)
+    
+    # Check for BaseHybridHead's q_params
+    if "q_params" in summary:
+        shape = summary["q_params"]["shape"]
+        if len(shape) == 1:
+            # For BaseHybridHead: shape is (max_layers * n_qubits,)
+            qlayer = find_quantum_layer(model)
+            if hasattr(qlayer, "n_qubits") and hasattr(qlayer, "max_layers"):
+                return {"n_qubits": qlayer.n_qubits, "q_depth": qlayer.q_depth, "max_layers": qlayer.max_layers}
+            
+    # Check for TorchLayer's weights
+    for name, meta in summary.items():
+        if name.endswith("weights") or name == "weights":
+            shape = meta["shape"]
+            if len(shape) == 2:
+                # Common PennyLane shape: (q_depth, n_qubits)
+                return {"n_qubits": shape[1], "q_depth": shape[0]}
+                
+    raise ValueError("Could not infer n_qubits and q_depth from the quantum weights.")
+
+def get_default_quantum_dummy_input(n_qubits: int, default_val: float = 0.5) -> torch.Tensor:
+    """
+    Create a constant dummy input tensor for quantum circuit visualization.
+    
+    Args:
+        n_qubits (int): Number of qubits (length of the input).
+        default_val (float): The constant value to fill the tensor with.
+        
+    Returns:
+        torch.Tensor: A 1D tensor of shape (n_qubits,).
+    """
+    return torch.full((n_qubits,), default_val, dtype=torch.float32)
+
+def draw_quantum_circuit_from_model(model: nn.Module, dummy_input: torch.Tensor | None = None, style: str = "pennylane") -> None:
+    """
+    Reconstruct and draw the quantum circuit corresponding to the model's quantum layer.
+    
+    Args:
+        model (nn.Module): The full hybrid model.
+        dummy_input (torch.Tensor | None): Optional input tensor. If None, a default is generated.
+        style (str): The drawing style (e.g., "pennylane", "black_white").
+        
+    Raises:
+        ValueError: If PennyLane is not installed or the quantum layer cannot be found/inferred.
+    """
+    try:
+        import pennylane as qml
+        from pennylane import numpy as pnp
+        import matplotlib.pyplot as plt
+    except ImportError:
+        raise ValueError("PennyLane and Matplotlib are required to draw the quantum circuit.")
+        
+    qlayer = find_quantum_layer(model)
+    if qlayer is None:
+        raise ValueError("No quantum layer found in the model.")
+        
+    metadata = infer_quantum_metadata(model)
+    n_qubits = metadata["n_qubits"]
+    
+    if dummy_input is None:
+        dummy_input = get_default_quantum_dummy_input(n_qubits)
+        
+    # Attempt to extract weights
+    weights_dict = extract_quantum_weights(model)
+    if "q_params" in weights_dict:
+        weights = weights_dict["q_params"].flatten().cpu().numpy()
+        max_layers = metadata.get("max_layers", metadata["q_depth"])
+        q_depth = metadata["q_depth"]
+        
+        # Use the BaseHybridHead builder
+        try:
+            from src.quantum_circuit import build_qnode, build_qnode2, DressedQuantumCircuit
+            
+            dev = qml.device("default.qubit", wires=n_qubits)
+            
+            # Check if it's the enhanced circuit
+            if isinstance(qlayer, DressedQuantumCircuit):
+                qnode = build_qnode2(n_qubits, q_depth, max_layers, dev)
+            else:
+                qnode = build_qnode(n_qubits, q_depth, max_layers, dev)
+                
+            print("ASCII circuit diagram (templates):")
+            print(qml.draw(qnode)(dummy_input, weights))
+            
+            try:
+                drawer = qml.draw_mpl(qnode, expansion_strategy="device", style=style)
+                fig, ax = drawer(dummy_input, weights)
+                plt.show()
+            except Exception as e:
+                print(f"Matplotlib draw failed: {e}")
+                
+            return
+            
+        except ImportError:
+            pass
+
+    # Fallback for standard TorchLayer
+    weights_tensor = None
+    for name, w in weights_dict.items():
+        if name.endswith("weights") or name == "weights":
+            weights_tensor = w.detach().cpu().numpy()
+            break
+            
+    if weights_tensor is not None:
+        dev = qml.device("default.qubit", wires=n_qubits)
+        
+        @qml.qnode(dev)
+        def qnode(inputs, w):
+            qml.AngleEmbedding(inputs, wires=range(n_qubits))
+            qml.BasicEntanglerLayers(w, wires=range(n_qubits))
+            return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
+            
+        print("ASCII circuit diagram (TorchLayer):")
+        print(qml.draw(qnode)(dummy_input, weights_tensor))
+        
+        try:
+            drawer = qml.draw_mpl(qnode, expansion_strategy="device", style=style)
+            fig, ax = drawer(dummy_input, weights_tensor)
+            plt.show()
+        except Exception as e:
+            print(f"Matplotlib draw failed: {e}")
+            
+        return
+        
+    raise ValueError("Could not extract weights to draw the circuit.")
