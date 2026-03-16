@@ -267,10 +267,10 @@ def draw_quantum_circuit_from_model(model: nn.Module, dummy_input: torch.Tensor 
                 qnode = build_qnode(n_qubits, q_depth, max_layers, dev)
                 
             print("ASCII circuit diagram (templates):")
-            print(qml.draw(qnode)(dummy_input, weights))
+            print(qml.draw(qnode, level="device")(dummy_input, weights))
             
             try:
-                drawer = qml.draw_mpl(qnode, expansion_strategy="device", style=style)
+                drawer = qml.draw_mpl(qnode, level="device", style=style)
                 fig, ax = drawer(dummy_input, weights)
                 plt.show()
             except Exception as e:
@@ -298,10 +298,10 @@ def draw_quantum_circuit_from_model(model: nn.Module, dummy_input: torch.Tensor 
             return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
             
         print("ASCII circuit diagram (TorchLayer):")
-        print(qml.draw(qnode)(dummy_input, weights_tensor))
+        print(qml.draw(qnode, level="device")(dummy_input, weights_tensor))
         
         try:
-            drawer = qml.draw_mpl(qnode, expansion_strategy="device", style=style)
+            drawer = qml.draw_mpl(qnode, level="device", style=style)
             fig, ax = drawer(dummy_input, weights_tensor)
             plt.show()
         except Exception as e:
