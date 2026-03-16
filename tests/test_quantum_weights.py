@@ -127,5 +127,53 @@ class TestQuantumWeights(unittest.TestCase):
         except Exception as e:
             self.fail(f"Drawing circuit raised an unexpected exception: {e}")
 
+
+    @patch('src.quantum_weights.BaseHybridHead', FakeBaseHybridHead, create=True)
+    def test_extract_quantum_inputs(self):
+        head = FakeBaseHybridHead(4, 2, 5)
+        model = nn.Sequential(
+            nn.Linear(10, 10),
+            head,
+            nn.Linear(4, 2)
+        )
+        qw.BaseHybridHead = FakeBaseHybridHead
+        
+        sample = torch.randn(3, 10)
+        q_in = qw.extract_quantum_inputs(model, sample)
+        self.assertIsNotNone(q_in)
+        # FakeBaseHybridHead captures inputs at its root, so it sees the (3, 10) output of the preceding Linear layer
+        self.assertEqual(q_in.shape, (3, 10))
+        
+    @patch('src.quantum_weights.BaseHybridHead', FakeBaseHybridHead, create=True)
+    def test_export_quantum_artifacts(self):
+        import tempfile
+        import os
+        import numpy as np
+        
+        head = FakeBaseHybridHead(4, 2, 5)
+        model = nn.Sequential(head)
+        qw.BaseHybridHead = FakeBaseHybridHead
+        
+        sample = torch.randn(2, 10)
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            artifacts = qw.export_quantum_artifacts(model, sample_input=sample, save_dir=tmpdir)
+            
+            self.assertIn("metadata", artifacts)
+            self.assertIn("n_qubits", artifacts["metadata"])
+            self.assertIn("weights", artifacts)
+            # FakeBaseHybridHead outputs 'q_params'
+            self.assertIn("q_params", artifacts["weights"])
+            self.assertIsNotNone(artifacts["inputs"])
+            self.assertEqual(artifacts["inputs"].shape, (2, 10))
+            
+            files = os.listdir(tmpdir)
+            self.assertIn("quantum_metadata.json", files)
+            self.assertIn("quantum_weights.npz", files)
+            self.assertIn("quantum_inputs.npy", files)
+            
+            loaded_inputs = np.load(os.path.join(tmpdir, "quantum_inputs.npy"))
+            self.assertTrue(np.allclose(loaded_inputs, artifacts["inputs"]))
+
 if __name__ == "__main__":
     unittest.main()
