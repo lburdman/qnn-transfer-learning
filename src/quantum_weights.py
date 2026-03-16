@@ -25,10 +25,14 @@ def find_quantum_layer(model: nn.Module) -> nn.Module | None:
     except ImportError:
         TorchLayer = type("PlaceholderTorchLayer", (), {})
 
-    try:
-        from src.quantum_circuit import BaseHybridHead
-    except ImportError:
-        BaseHybridHead = type("PlaceholderBaseHybridHead", (), {})
+    # Allow injection for mocking via globals
+    if 'BaseHybridHead' in globals():
+        BaseHybridHead = globals()['BaseHybridHead']
+    else:
+        try:
+            from src.quantum_circuit import BaseHybridHead
+        except ImportError:
+            BaseHybridHead = type("PlaceholderBaseHybridHead", (), {})
 
     # Direct match
     if isinstance(model, (BaseHybridHead, TorchLayer)):
@@ -137,12 +141,17 @@ def find_classical_to_quantum_mapper(model: nn.Module) -> nn.Module | None:
     if qlayer is None:
         raise ValueError("Quantum layer not found in the model.")
 
-    try:
-        from src.quantum_circuit import BaseHybridHead
+    if 'BaseHybridHead' in globals():
+        BaseHybridHead = globals()['BaseHybridHead']
         if isinstance(qlayer, BaseHybridHead):
             return getattr(qlayer, "pre_net", None)
-    except ImportError:
-        pass
+    else:
+        try:
+            from src.quantum_circuit import BaseHybridHead
+            if isinstance(qlayer, BaseHybridHead):
+                return getattr(qlayer, "pre_net", None)
+        except ImportError:
+            pass
 
     try:
         from pennylane.qnn import TorchLayer
