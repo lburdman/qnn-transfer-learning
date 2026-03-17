@@ -175,5 +175,61 @@ class TestQuantumWeights(unittest.TestCase):
             loaded_inputs = np.load(os.path.join(tmpdir, "quantum_inputs.npy"))
             self.assertTrue(np.allclose(loaded_inputs, artifacts["inputs"]))
 
+    def test_find_final_classifier(self):
+        """find_final_classifier should return the nn.Linear immediately after the TorchLayer."""
+        import numpy as np
+
+        # Build a realistic hybrid head: Linear → ReLU → FakeTorchLayer → Linear
+        class FakeTorchLayer(nn.Module):
+            def forward(self, x):
+                return x
+
+        try:
+            from pennylane.qnn import TorchLayer as PL_TorchLayer
+        except ImportError:
+            PL_TorchLayer = None
+
+        n_qubits = 4
+        n_classes = 2
+
+        # Build Sequential that looks like model_builder._build_classifier_head output
+        fake_qlayer = FakeTorchLayer()
+
+        # Patch TorchLayer to be our FakeTorchLayer inside find_final_classifier
+        with patch("pennylane.qnn.TorchLayer", FakeTorchLayer):
+            head = nn.Sequential(
+                nn.Linear(8, n_qubits),
+                nn.ReLU(),
+                fake_qlayer,
+                nn.Linear(n_qubits, n_classes),
+            )
+            wrapped = nn.Sequential(nn.Identity(), head)
+            result = qw.find_final_classifier(wrapped)
+
+        self.assertIsNotNone(result, "Expected find_final_classifier to find the trailing Linear")
+        self.assertIsInstance(result, nn.Linear)
+        self.assertEqual(result.out_features, n_classes)
+        self.assertEqual(result.in_features, n_qubits)
+
+    def test_apply_final_classifier(self):
+        """apply_final_classifier should compute W.T @ x + b correctly."""
+        import numpy as np
+
+        n_samples = 3
+        n_qubits = 4
+        n_classes = 2
+
+        rng = np.random.default_rng(42)
+        quantum_outputs = rng.uniform(-1.0, 1.0, size=(n_samples, n_qubits))
+        W = rng.standard_normal(size=(n_classes, n_qubits))
+        b = rng.standard_normal(size=(n_classes,))
+
+        result = qw.apply_final_classifier(quantum_outputs, W, b)
+
+        expected = quantum_outputs @ W.T + b
+        self.assertEqual(result.shape, (n_samples, n_classes))
+        np.testing.assert_allclose(result, expected, rtol=1e-5)
+
+
 if __name__ == "__main__":
     unittest.main()

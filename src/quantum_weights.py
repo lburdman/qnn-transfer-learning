@@ -468,3 +468,63 @@ def export_quantum_artifacts(model: nn.Module, sample_input: torch.Tensor | None
             np.save(os.path.join(save_dir, "quantum_inputs.npy"), artifacts["inputs"])
             
     return artifacts
+
+
+def find_final_classifier(model: nn.Module) -> nn.Module | None:
+    """
+    Find the final linear classification layer that comes *immediately after*
+    the quantum TorchLayer in the trained hybrid model.
+
+    In the current project architecture (built by model_builder._build_classifier_head),
+    the quantum Sequential head is:
+        nn.Linear(in_features, n_qubits)   ← classical-to-quantum mapper
+        nn.ReLU()
+        TorchLayer(...)                     ← quantum layer
+        nn.Linear(n_qubits, n_classes)      ← final classifier  ← this is what we return
+
+    Args:
+        model: The full hybrid PyTorch model.
+
+    Returns:
+        nn.Linear | None: The final classifier layer, or None if not found.
+    """
+    try:
+        from pennylane.qnn import TorchLayer
+    except ImportError:
+        TorchLayer = type("PlaceholderTorchLayer", (), {})
+
+    for module in model.modules():
+        if isinstance(module, nn.Sequential):
+            children = list(module.children())
+            for i, child in enumerate(children):
+                if isinstance(child, TorchLayer):
+                    # Look for the first nn.Linear that comes AFTER the quantum layer
+                    for j in range(i + 1, len(children)):
+                        if isinstance(children[j], nn.Linear):
+                            return children[j]
+    return None
+
+
+def apply_final_classifier(
+    quantum_outputs: "np.ndarray",
+    classifier_weight: "np.ndarray",
+    classifier_bias: "np.ndarray",
+) -> "np.ndarray":
+    """
+    Apply the trained final linear classifier to a batch of quantum output vectors.
+
+    This reconstructs the nn.Linear(n_qubits, n_classes) forward pass:
+        logits = quantum_outputs @ W.T + b
+
+    Args:
+        quantum_outputs:   numpy array of shape (n_samples, n_qubits) containing <Z>
+                           expectation values from the quantum circuit.
+        classifier_weight: numpy array of shape (n_classes, n_qubits), the .weight
+                           matrix of the final nn.Linear layer.
+        classifier_bias:   numpy array of shape (n_classes,), the .bias vector.
+
+    Returns:
+        numpy array of shape (n_samples, n_classes) — the final logits.
+    """
+    import numpy as _np
+    return _np.dot(quantum_outputs, classifier_weight.T) + classifier_bias
