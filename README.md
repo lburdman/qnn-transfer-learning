@@ -108,11 +108,13 @@ This project is designed to run on **Google Colab** with the standard Colab GPU 
 - `panns_inference` (for PANNs CNN14 embeddings)
 - `qiskit`, `qiskit-ibm-runtime` (optional, for hardware verification)
 
-Install in Colab via the setup cell at the top of each notebook, or locally with:
+Install all dependencies locally using the provided `requirements.txt`:
 
 ```bash
-pip install pennylane torch torchvision torchaudio librosa pandas matplotlib scikit-learn panns-inference
+pip install -r requirements.txt
 ```
+
+> **Note:** `numpy<2` is pinned because the current PyTorch binary wheels require the NumPy 1.x ABI. Upgrading NumPy to 2.x will cause a runtime incompatibility with torch until a matching torch wheel is built. Colab notebooks automatically use compatible versions.
 
 ---
 

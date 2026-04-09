@@ -14,7 +14,6 @@ import numpy as np
 import torch
 import torchaudio
 from PIL import Image
-from panns_inference import AudioTagging
 from tqdm import tqdm
 
 from src.utils import create_dir, load_image
@@ -135,7 +134,7 @@ def extract_embeddings(model, model_name: str, split_name: str, classes: Sequenc
                 print(f"Error extracting embedding for {img_path}: {exc}")
 
 
-def extract_panns_embedding(audio_path: str, at_model: AudioTagging, target_sr: int = 32000) -> np.ndarray:
+def extract_panns_embedding(audio_path: str, at_model: "AudioTagging", target_sr: int = 32000) -> np.ndarray:
     """
     Load an audio file, resample, and compute a 2048-dim PANNs embedding.
 
@@ -147,6 +146,13 @@ def extract_panns_embedding(audio_path: str, at_model: AudioTagging, target_sr: 
     Returns:
         Embedding array with shape (2048,).
     """
+    try:
+        from panns_inference import AudioTagging as _AudioTagging  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(
+            "panns-inference is required for PANNs embeddings. "
+            "Install it with: pip install panns-inference"
+        ) from exc
     audio, _ = librosa.load(audio_path, sr=target_sr, mono=True)
     audio = audio.astype(np.float32)[None, :]
     with torch.no_grad():
@@ -155,7 +161,7 @@ def extract_panns_embedding(audio_path: str, at_model: AudioTagging, target_sr: 
 
 
 def process_panns_embeddings(split_df, split_name: str, pann_dir: str, classes: Sequence[str],
-                             audio_tagging: AudioTagging, target_sr: int = 32000) -> None:
+                             audio_tagging: "AudioTagging", target_sr: int = 32000) -> None:
     """
     Extract and save PANNs embeddings for each audio file in a split.
 
