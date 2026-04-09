@@ -14,7 +14,6 @@ import torchvision
 from torch.utils.data import DataLoader
 from torchvision.models import ResNet18_Weights, VGG16_Weights
 
-# Used in: crema_d_hybrid_qnn.ipynb (custom CNN backbone)
 def create_custom_cnn(input_channels: int = 3) -> nn.Module:
     """
     Build a lightweight CNN backbone returning a flattened feature vector.
@@ -195,7 +194,6 @@ class FrozenBackboneWithHead(nn.Module):
         return self.head(bottleneck)
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (quantum layer construction)
 def build_quantum_layer(
     n_qubits: int,
     q_depth: int,
@@ -303,7 +301,6 @@ def _build_classifier_head(
         raise ValueError(f"Unsupported classical_model: {classical_model}")
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (model assembly)
 def build_model(
     config: Dict[str, object],
     class_names: Sequence[str],
@@ -326,11 +323,7 @@ def build_model(
     Returns:
         Configured model moved to the specified device.
     """
-    alias_map = {
-        "cnn_specs": "cnn_specs",
-        "cnn_mfcc": "cnn_mfcc",
-    }
-    base_model = alias_map.get(config["base_model"], config["base_model"])
+    base_model = config["base_model"]
     quantum = config["quantum"]
     classical_model = config["classical_model"]
     n_qubits = config["n_qubits"]

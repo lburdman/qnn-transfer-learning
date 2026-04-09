@@ -17,7 +17,6 @@ from PIL import Image
 from torch.utils.data import DataLoader
 
 
-# Used in: src.training.py (visualize_model), ants_bees.ipynb (data preview), emotion_classification.py
 def imshow(tensor, title: str | None = None) -> None:
     """
     Display an image tensor after undoing normalization.
@@ -47,7 +46,6 @@ def imshow(tensor, title: str | None = None) -> None:
         plt.title(title)
 
 
-# Used in: crema-d-enhanced.ipynb (dataset preview), crema-d-updated.ipynb (dataset preview)
 def show_exact_images_from_dataloader(dataloader: DataLoader, phase: str = "train", n_images: int = 4,
                                       prefix: str = "", grayscale: bool = False) -> None:
     """
@@ -150,7 +148,6 @@ def configure_run(base_model: str, quantum: bool, classical_model: str = "512_nq
         pass
     return config
 
-# Used in: audio_preprocessing.ipynb (directory setup), data_analysis.ipynb (file operations)
 def create_dir(path: str | Path) -> None:
     """
     Create a directory if it does not already exist.
@@ -161,7 +158,6 @@ def create_dir(path: str | Path) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-# Used in: audio_preprocessing.ipynb (embedding extraction)
 def load_image(image_path: str | Path) -> Image.Image:
     """
     Load an image from disk and convert it to RGB.

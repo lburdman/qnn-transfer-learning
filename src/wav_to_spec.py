@@ -14,66 +14,13 @@ import numpy as np
 import torch
 import torchaudio
 from PIL import Image
-from panns_inference import AudioTagging
 from tqdm import tqdm
 
 from src.utils import create_dir, load_image
 
 
-# DEPRECATED: currently not used anywhere in the project, kept for backwards compatibility.
-# Used in: src.wav_to_spec.py (module manual test)
-def process_audio_to_melspec(
-    input_path: str,
-    output_path: str | None = None,
-    label: str | None = None,
-    sample_rate: int = 16000,
-    duration: int = 3,
-    n_mels: int = 128,
-    save: bool = True,
-) -> None:
-    """
-    Convert a WAV file to a mel-spectrogram image.
-
-    Args:
-        input_path: Path to the input WAV file.
-        output_path: Base directory for saving images.
-        label: Subdirectory label for saving.
-        sample_rate: Target sample rate.
-        duration: Duration in seconds to retain.
-        n_mels: Number of mel filter banks.
-        save: Save the spectrogram when True; otherwise display it.
-    """
-    signal, sr = librosa.load(input_path, sr=sample_rate)
-    desired_length = sr * duration
-    if len(signal) < desired_length:
-        signal = np.pad(signal, (0, desired_length - len(signal)), mode="constant")
-    else:
-        signal = signal[:desired_length]
-
-    mel_spec = librosa.feature.melspectrogram(y=signal, sr=sr, n_mels=n_mels)
-    mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
-
-    plt = librosa.display  # type: ignore
-    import matplotlib.pyplot as mpl_plt
-
-    mpl_plt.figure(figsize=(2.24, 2.24), dpi=100)
-    plt.specshow(mel_spec_db, sr=sr, x_axis="time", y_axis="mel", cmap="magma")
-    mpl_plt.axis("off")
-    mpl_plt.tight_layout()
-
-    if save and output_path and label:
-        create_dir(os.path.join(output_path, label))
-        base_name = os.path.basename(input_path).replace(".wav", ".png")
-        out_file = os.path.join(output_path, label, base_name)
-        mpl_plt.savefig(out_file, bbox_inches="tight", pad_inches=0)
-        mpl_plt.close()
-    elif not save:
-        mpl_plt.show()
-    else:
-        raise ValueError("If save=True, both output_path and label must be provided.")
 
 
-# Used in: audio_preprocessing.ipynb (spectrogram generation)
 def save_melspectrogram(audio_path: str, save_path: str, target_sr: int, n_fft: int, hop_length: int,
                         n_mels: int) -> None:
     """
@@ -106,7 +53,6 @@ def save_melspectrogram(audio_path: str, save_path: str, target_sr: int, n_fft: 
         print(f"Error generating spectrogram for {audio_path}: {exc}")
 
 
-# Used in: audio_preprocessing.ipynb (spectrogram generation)
 def process_spectrograms(split_df, split_name: str, spec_dir: str, target_sr: int, n_fft: int, hop_length: int,
                          n_mels: int) -> None:
     """
@@ -132,7 +78,6 @@ def process_spectrograms(split_df, split_name: str, spec_dir: str, target_sr: in
                                 hop_length=hop_length, n_mels=n_mels)
 
 
-# Used in: audio_preprocessing.ipynb (embedding extraction)
 def build_embedding_transform():
     """
     Create the torchvision transform used for image-based embedding extraction.
@@ -150,7 +95,6 @@ def build_embedding_transform():
     ])
 
 
-# Used in: audio_preprocessing.ipynb (embedding extraction)
 def extract_embeddings(model, model_name: str, split_name: str, classes: Sequence[str], spec_dir: str, emb_dir: str,
                        device, embedding_transform) -> None:
     """
@@ -190,8 +134,7 @@ def extract_embeddings(model, model_name: str, split_name: str, classes: Sequenc
                 print(f"Error extracting embedding for {img_path}: {exc}")
 
 
-# Used in: audio_preprocessing.ipynb (PANNs embedding extraction)
-def extract_panns_embedding(audio_path: str, at_model: AudioTagging, target_sr: int = 32000) -> np.ndarray:
+def extract_panns_embedding(audio_path: str, at_model: "AudioTagging", target_sr: int = 32000) -> np.ndarray:
     """
     Load an audio file, resample, and compute a 2048-dim PANNs embedding.
 
@@ -203,6 +146,13 @@ def extract_panns_embedding(audio_path: str, at_model: AudioTagging, target_sr: 
     Returns:
         Embedding array with shape (2048,).
     """
+    try:
+        from panns_inference import AudioTagging as _AudioTagging  # noqa: F401
+    except ImportError as exc:
+        raise ImportError(
+            "panns-inference is required for PANNs embeddings. "
+            "Install it with: pip install panns-inference"
+        ) from exc
     audio, _ = librosa.load(audio_path, sr=target_sr, mono=True)
     audio = audio.astype(np.float32)[None, :]
     with torch.no_grad():
@@ -210,9 +160,8 @@ def extract_panns_embedding(audio_path: str, at_model: AudioTagging, target_sr: 
     return np.asarray(embedding[0], dtype=np.float32)
 
 
-# Used in: audio_preprocessing.ipynb (PANNs embedding extraction)
 def process_panns_embeddings(split_df, split_name: str, pann_dir: str, classes: Sequence[str],
-                             audio_tagging: AudioTagging, target_sr: int = 32000) -> None:
+                             audio_tagging: "AudioTagging", target_sr: int = 32000) -> None:
     """
     Extract and save PANNs embeddings for each audio file in a split.
 
@@ -242,7 +191,6 @@ def process_panns_embeddings(split_df, split_name: str, pann_dir: str, classes: 
             print(f"Error extracting PANNs embedding for {file_path}: {exc}")
 
 
-# Used in: audio_preprocessing.ipynb (MFCC generation)
 def process_mfccs(split_df, split_name: str, mfcc_dir: str, target_sr: int, n_mfcc: int, n_fft: int,
                   hop_length: int) -> None:
     """

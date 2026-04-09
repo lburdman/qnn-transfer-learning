@@ -18,7 +18,6 @@ from src.plot_functions import plot_confusion_matrix
 SEED = 42
 
 
-# Used in: data_analysis.ipynb (sample down projections)
 def subsample_for_viz(X, y, max_samples: int, random_state: int = SEED):
     """
     Subsample arrays for visualization without replacement.
@@ -41,7 +40,6 @@ def subsample_for_viz(X, y, max_samples: int, random_state: int = SEED):
     return X[idx], y[idx], idx
 
 
-# Used in: data_analysis.ipynb (t-SNE configuration)
 def resolve_tsne_perplexity(n_samples: int, requested: int | None = None) -> int:
     """
     Choose a valid t-SNE perplexity based on the sample count.
@@ -61,7 +59,6 @@ def resolve_tsne_perplexity(n_samples: int, requested: int | None = None) -> int
     return min(candidate, n_samples - 1)
 
 
-# Used in: data_analysis.ipynb (dimensionality reduction)
 def run_dim_reduction(X, method: str = "pca", n_components: int = 2, scale: bool = True,
                       random_state: int = SEED, **kwargs):
     """
@@ -111,7 +108,6 @@ def run_dim_reduction(X, method: str = "pca", n_components: int = 2, scale: bool
     return model, coords
 
 
-# Used in: data_analysis.ipynb (baseline embeddings evaluation)
 def run_baseline_classifiers(X_train, y_train, X_test, y_test, label_order, random_state: int = SEED):
     """
     Train and evaluate simple baseline classifiers on embeddings.
