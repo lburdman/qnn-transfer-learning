@@ -14,7 +14,6 @@ import matplotlib.pyplot as plt
 import torch
 from sklearn.metrics import accuracy_score, confusion_matrix, precision_recall_fscore_support, f1_score
 from torch import nn, optim
-import torch.nn.functional as F
 from torch.optim import lr_scheduler
 
 from tqdm.auto import tqdm
@@ -24,7 +23,6 @@ from src.model_builder import (
     BackboneWithClassifier,
     FrozenBackboneWithHead,
     build_quantum_layer,
-    build_quantum_head,
     load_backbone_checkpoint,
     save_backbone_checkpoint,
 )
@@ -338,34 +336,6 @@ def summarize_experiments(results: List[Dict[str, object]]) -> None:
         )
 
 
-def quantum_probability_helper(
-    model: nn.Module,
-    inputs: torch.Tensor,
-    class_names: List[str],
-    device,
-    max_samples: int = 4,
-) -> torch.Tensor:
-    """
-    Compute and optionally plot class probabilities from a quantum head.
-    """
-    model.eval()
-    with torch.no_grad():
-        logits = model(inputs.to(device))
-        probs = F.softmax(logits, dim=1).cpu()
-
-    num_samples = min(max_samples, probs.shape[0])
-    fig, axes = plt.subplots(1, num_samples, figsize=(3 * num_samples, 3))
-    axes = [axes] if num_samples == 1 else axes
-    for idx in range(num_samples):
-        ax = axes[idx]
-        ax.bar(range(len(class_names)), probs[idx].numpy())
-        ax.set_xticks(range(len(class_names)))
-        ax.set_xticklabels(class_names, rotation=45, ha="right")
-        ax.set_ylim(0, 1)
-        ax.set_title(f"Sample {idx}")
-    plt.tight_layout()
-    return probs
-
 
 def freeze_module_params(module: nn.Module) -> None:
     """
@@ -407,7 +377,6 @@ def train_model(model: nn.Module, dataloaders: Dict[str, torch.utils.data.DataLo
         optimizer=optimizer,
     )
 
-# Used in: crema_d_hybrid_qnn.ipynb (evaluation and confusion matrix)
 def evaluate_model(model: nn.Module, dataloader, class_names, device, model_dir: str,
                    split_name: str = "test") -> Dict[str, float]:
     """
@@ -461,9 +430,9 @@ def evaluate_model(model: nn.Module, dataloader, class_names, device, model_dir:
         yticks=range(len(class_names)),
         xticklabels=class_names,
         yticklabels=class_names,
-        xlabel="Predicciones",
-        ylabel="Etiqueta real",
-        title=f"Matriz de confusión ({split_name})",
+        xlabel="Predicted",
+        ylabel="True label",
+        title=f"Confusion matrix ({split_name})",
     )
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
     threshold = cm.max() / 2.0

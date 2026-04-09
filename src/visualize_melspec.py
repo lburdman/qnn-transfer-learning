@@ -17,7 +17,6 @@ import torch
 import torchaudio
 
 
-# Used in: src.wav_to_spec.py (internal helper reuse), data_analysis.ipynb (mfcc previews)
 def audio_to_melspec_tensor(waveform: torch.Tensor, sample_rate: int = 16000, n_mels: int = 128,
                             duration: int = 3, hop_length: int = 512) -> torch.Tensor:
     """
@@ -47,7 +46,6 @@ def audio_to_melspec_tensor(waveform: torch.Tensor, sample_rate: int = 16000, n_
     return mel_tensor
 
 
-# Used in: audio_preprocessing.ipynb (quick visualization), data_analysis.ipynb (examples)
 def show_example_spectrograms(spec_root: str | Path, n_classes: int = 6) -> None:
     """
     Display one spectrogram image per class from a root directory.
@@ -79,7 +77,6 @@ def show_example_spectrograms(spec_root: str | Path, n_classes: int = 6) -> None
     plt.show()
 
 
-# Used in: audio_preprocessing.ipynb (MFCC preview)
 def show_example_mfcc(mfcc: np.ndarray, title: str = "MFCC example") -> None:
     """
     Display an MFCC array with time axis.
@@ -96,7 +93,6 @@ def show_example_mfcc(mfcc: np.ndarray, title: str = "MFCC example") -> None:
     plt.show()
 
 
-# Used in: data_analysis.ipynb (waveform/mel visualization)
 def plot_waveform(audio_path: str | Path, ax=None, sr: int = 22050):
     """
     Plot waveform amplitude over time.
@@ -119,7 +115,6 @@ def plot_waveform(audio_path: str | Path, ax=None, sr: int = 22050):
     return ax
 
 
-# Used in: data_analysis.ipynb (waveform/mel visualization)
 def plot_melspectrogram(audio_path: str | Path, sr: int | None = None, ax=None,
                         n_fft: int = 2048, hop_length: int = 512, n_mels: int = 128):
     """
@@ -161,7 +156,6 @@ def plot_melspectrogram(audio_path: str | Path, sr: int | None = None, ax=None,
     return ax
 
 
-# Used in: data_analysis.ipynb (example visualization)
 def plot_example_waveform_and_mel(row: Dict[str, str]) -> None:
     """
     Plot waveform and mel-spectrogram side by side for a metadata row.
@@ -178,7 +172,6 @@ def plot_example_waveform_and_mel(row: Dict[str, str]) -> None:
     plt.show()
 
 
-# Used in: data_analysis.ipynb (MFCC visualization)
 def plot_example_waveform_and_mfcc(row: Dict[str, str], audio_path: str | None = None) -> None:
     """
     Plot waveform and MFCC features for a metadata row.
@@ -227,7 +220,6 @@ def plot_example_waveform_and_mfcc(row: Dict[str, str], audio_path: str | None =
     plt.show()
 
 
-# Used in: src.visualize_melspec.py (manual test), visualize_melspec.ipynb derivatives
 def plot_melspectrograms_from_files(file_dict: Dict[str, str]) -> None:
     """
     Plot a grid of mel-spectrograms given a mapping from label to audio path.
@@ -254,11 +246,10 @@ def plot_melspectrograms_from_files(file_dict: Dict[str, str]) -> None:
 
 # Example usage for manual testing
 if __name__ == "__main__":
-    base_dir = "C:/Users/Lucas/Documents/Facultad/Tesis"
-    sample_dir = os.path.join(base_dir, "./CremaD/data_filtered")
+    # Replace these paths with your local CREMA-D audio samples.
     files = {
-        "Anger": os.path.join(sample_dir, "1003_IOM_ANG_XX.wav"),
-        "Happy": os.path.join(sample_dir, "1003_IOM_HAP_XX.wav"),
-        "Sad": os.path.join(sample_dir, "1003_IOM_SAD_XX.wav"),
+        "Anger": "/path/to/CREMAD/AudioWAV/1003_IOM_ANG_XX.wav",
+        "Happy": "/path/to/CREMAD/AudioWAV/1003_IOM_HAP_XX.wav",
+        "Sad":   "/path/to/CREMAD/AudioWAV/1003_IOM_SAD_XX.wav",
     }
     plot_melspectrograms_from_files(files)

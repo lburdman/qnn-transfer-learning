@@ -20,7 +20,6 @@ from torchvision import datasets, transforms
 from src.audio_processing import compute_log_mel_spectrogram, compute_mfcc, load_audio, normalize_feature
 
 
-# Used in: crema-d.ipynb, crema-d-updated.ipynb, crema-d-enhanced.ipynb (SpecAugment option)
 class SpecAugment:
     """
     Apply SpecAugment-style time and frequency masking to spectrogram tensors.
@@ -59,7 +58,6 @@ class SpecAugment:
         return spec
 
 
-# Used in: crema-d.ipynb, crema-d-updated.ipynb, crema-d-enhanced.ipynb (ImageFolder training)
 def get_data_transforms(spec_augment: bool = False) -> Dict[str, transforms.Compose]:
     """
     Build torchvision transforms for train and validation splits.
@@ -90,7 +88,6 @@ def get_data_transforms(spec_augment: bool = False) -> Dict[str, transforms.Comp
     }
 
 
-# Used in: crema-d.ipynb, crema-d-updated.ipynb, crema-d-enhanced.ipynb, emotion_classification.py
 def get_dataloaders(data_dir: str, batch_size: int = 4, shuffle: bool = True, num_workers: int = 0,
                     spec_augment: bool = False) -> Tuple[Dict[str, DataLoader], Dict[str, int], List[str]]:
     """
@@ -126,7 +123,6 @@ def get_dataloaders(data_dir: str, batch_size: int = 4, shuffle: bool = True, nu
     return dataloaders, dataset_sizes, class_names
 
 
-# Used in: crema-d-updated.ipynb, crema-d-enhanced.ipynb (grayscale experiments)
 def create_dataloaders(data_dir: str, batch_size: int = 8, shuffle: bool = True, num_workers: int = 4,
                        grayscale: bool = False) -> Tuple[Dict[str, DataLoader], Dict[str, int], List[str]]:
     """
@@ -167,7 +163,6 @@ def create_dataloaders(data_dir: str, batch_size: int = 8, shuffle: bool = True,
     return dataloaders, dataset_sizes, class_names
 
 
-# Used in: crema-d-updated.ipynb, crema-d-enhanced.ipynb (class distribution reporting)
 def count_images_per_class_from_dataset(dataset: datasets.ImageFolder, class_names: Sequence[str]) -> Dict[str, int]:
     """
     Count images per class using the targets stored in an ImageFolder dataset.
@@ -183,7 +178,6 @@ def count_images_per_class_from_dataset(dataset: datasets.ImageFolder, class_nam
     return {class_names[idx]: counts[idx] for idx in range(len(class_names))}
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (hybrid data pipeline)
 class AudioFeatureDataset(Dataset):
     """
     Generic dataset supporting spectrogram images, embeddings, and MFCC features.
@@ -353,7 +347,6 @@ class CREMADWaveformDataset(Dataset):
         return feature, label
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (hybrid data pipeline)
 def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_workers: int = 4
                            ) -> Tuple[Dict[str, DataLoader], Dict[str, int], List[str], Dict[str, Dict[str, int]]]:
     """
@@ -493,7 +486,6 @@ def create_dataloaders_all(config: Dict[str, object], shuffle: bool = True, num_
     return dataloaders, dataset_sizes, class_names, counts_per_class
 
 
-# Used in: data_analysis.ipynb (metadata loading)
 def load_metadata(selected_classes: Sequence[str] | None = None, splits_dir: Path | None = None,
                   audio_dir: Path | None = None) -> pd.DataFrame:
     """
@@ -526,7 +518,6 @@ def load_metadata(selected_classes: Sequence[str] | None = None, splits_dir: Pat
     return meta
 
 
-# Used in: data_analysis.ipynb (feature loading helpers)
 def _load_feature_arrays(base_dir: Path, splits: Iterable[str], selected_classes: Sequence[str] | None,
                          preferred_keys: Sequence[str], flatten: bool = True,
                          path_col_name: str = "feature_path") -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
@@ -619,7 +610,6 @@ def _load_feature_arrays(base_dir: Path, splits: Iterable[str], selected_classes
     return X, y, meta_loaded
 
 
-# Used in: data_analysis.ipynb (embedding loading)
 def load_embeddings(embedding_type: str, embedding_paths: Dict[str, Path], splits: Iterable[str],
                     selected_classes: Sequence[str] | None) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """
@@ -649,7 +639,6 @@ def load_embeddings(embedding_type: str, embedding_paths: Dict[str, Path], split
     )
 
 
-# Used in: data_analysis.ipynb (MFCC loading)
 def load_mfcc_features(splits: Iterable[str], mfcc_dir: Path, selected_classes: Sequence[str] | None
                        ) -> Tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """

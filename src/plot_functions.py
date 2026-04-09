@@ -264,7 +264,6 @@ def plot_comparison_across_runs(
     plt.show()
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (metrics visualization), plots_models.ipynb (metrics visualization)
 def load_training_data(json_path: str) -> Dict:
     """
     Load training metrics from a JSON file.
@@ -281,7 +280,6 @@ def load_training_data(json_path: str) -> Dict:
         return json.load(handle)
 
 
-# Used in: crema_d_hybrid_qnn.ipynb (metrics visualization), plots_models.ipynb (metrics visualization)
 def get_model_name_from_path(json_path: str) -> str:
     """
     Infer a model name from a metrics file path.
@@ -305,7 +303,6 @@ def get_model_name_from_path(json_path: str) -> str:
     return filename
 
 
-# Used in: plots_models.ipynb (single model plots)
 def plot_training_metrics(json_path: str, metrics: str = "both", figsize: Sequence[int] = (12, 5),
                           save_path: str | None = None) -> None:
     """
@@ -368,7 +365,6 @@ def plot_training_metrics(json_path: str, metrics: str = "both", figsize: Sequen
     print(f"  Epochs: {len(epochs)}")
 
 
-# Used in: plots_models.ipynb (comparison plots)
 def plot_multiple_models(json_paths: Iterable[str], metrics: str = "both", figsize: Sequence[int] = (12, 5),
                          save_path: str | None = None) -> None:
     """
@@ -454,7 +450,6 @@ def plot_multiple_models(json_paths: Iterable[str], metrics: str = "both", figsi
         print(f"  Epochs: {len(epochs)}")
 
 
-# Used in: data_analysis.ipynb (dimensionality reduction plots)
 def plot_2d_projection(X_2d: np.ndarray, labels: np.ndarray, title: str, label_order: Sequence[str] | None = None,
                        alpha: float = 0.7) -> None:
     """
@@ -482,7 +477,6 @@ def plot_2d_projection(X_2d: np.ndarray, labels: np.ndarray, title: str, label_o
     plt.show()
 
 
-# Used in: data_analysis.ipynb (baseline classifier evaluation)
 def plot_confusion_matrix(cm: np.ndarray, labels: Sequence[str], title: str):
     """
     Plot a confusion matrix with labels on both axes.
@@ -511,55 +505,7 @@ def plot_confusion_matrix(cm: np.ndarray, labels: Sequence[str], title: str):
     return fig
 
 
-# DEPRECATED: replaced by the version used in crema_d_hybrid_qnn.ipynb.
-# The entire function below is kept commented out for historical reference.
-# def plot_overlapped_metrics(json_path, figsize=(10, 6), save_path=None):
-#     \"\"\"
-#     Plot loss and accuracy on dual axes for train/validation metrics.
-#
-#     Args:
-#         json_path: Path to the JSON metrics file.
-#         figsize: Figure size for the plot.
-#         save_path: Optional path to save the figure.
-#     \"\"\"
-#     data = load_training_data(json_path)
-#     model_name = get_model_name_from_path(json_path)
-#     epochs = range(1, len(data['train_losses']) + 1)
-#     fig, ax1 = plt.subplots(figsize=figsize)
-#     color1 = 'tab:red'
-#     ax1.set_xlabel('Epoch')
-#     ax1.set_ylabel('Loss', color=color1)
-#     line1 = ax1.plot(epochs, data['train_losses'], '--', color=color1,
-#                      label='Training Loss', linewidth=2, alpha=0.7)
-#     line2 = ax1.plot(epochs, data['val_losses'], '-', color=color1,
-#                      label='Validation Loss', linewidth=2)
-#     ax1.tick_params(axis='y', labelcolor=color1)
-#     ax1.grid(True, alpha=0.3)
-#     ax2 = ax1.twinx()
-#     color2 = 'tab:blue'
-#     ax2.set_ylabel('Accuracy', color=color2)
-#     line3 = ax2.plot(epochs, data['train_accs'], '--', color=color2,
-#                      label='Training Accuracy', linewidth=2, alpha=0.7)
-#     line4 = ax2.plot(epochs, data['val_accs'], '-', color=color2,
-#                      label='Validation Accuracy', linewidth=2)
-#     ax2.tick_params(axis='y', labelcolor=color2)
-#     ax2.set_ylim(0, 1)
-#     lines = line1 + line2 + line3 + line4
-#     labels = [line.get_label() for line in lines]
-#     ax1.legend(lines, labels, loc='center right')
-#     plt.title(f'{model_name} - Loss & Accuracy Overlapped')
-#     plt.tight_layout()
-#     if save_path:
-#         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-#         print(f"Figure saved to: {save_path}")
-#     plt.show()
-#     print(f"\\nModel statistics for {model_name}:")
-#     print(f"  Best Validation Loss: {min(data['val_losses']):.4f}")
-#     print(f"  Best Validation Accuracy: {max(data['val_accs']):.4f}")
-#     print(f"  Epochs: {len(epochs)}")
 
-
-# Used in: crema_d_hybrid_qnn.ipynb (canonical metrics plot), plots_models.ipynb (overlapped view)
 def plot_overlapped_metrics(json_path: str, figsize: Sequence[int] = (10, 6),
                             save_path: str | None = None) -> None:
     """
@@ -626,7 +572,6 @@ def plot_overlapped_metrics(json_path: str, figsize: Sequence[int] = (10, 6),
     print(f"  Epochs trained: {len(epochs)}")
 
 
-# Used in: plots_models.ipynb (automatic directory visualization)
 def plot_models_from_directory(directory: str = "runs_updated", pattern: str = "*.json", metrics: str = "both",
                                figsize: Sequence[int] = (12, 5), save_path: str | None = None) -> None:
     """
@@ -655,7 +600,6 @@ def plot_models_from_directory(directory: str = "runs_updated", pattern: str = "
         plot_multiple_models(json_paths, metrics=metrics, figsize=figsize, save_path=save_path)
 
 
-# Used in: plots_models.ipynb (latest run helper)
 def find_latest_metrics_file(directory: str = "runs_updated") -> str | None:
     """
     Locate the most recently modified metrics JSON in a directory.
@@ -673,7 +617,6 @@ def find_latest_metrics_file(directory: str = "runs_updated") -> str | None:
     return None
 
 
-# Used in: plots_models.ipynb (latest run helper)
 def plot_current_experiment(directory: str = "runs_updated", figsize: Sequence[int] = (12, 6),
                             save_path: str | None = None) -> None:
     """

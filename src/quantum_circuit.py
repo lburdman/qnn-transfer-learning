@@ -13,7 +13,6 @@ from typing import Optional
 from pathlib import Path
 
 
-# Used in: src.quantum_circuit.build_qnode (Hadamard initialization)
 def H_layer(nqubits: int) -> None:
     """
     Apply a Hadamard gate to all qubits.
@@ -25,7 +24,6 @@ def H_layer(nqubits: int) -> None:
         qml.Hadamard(wires=idx)
 
 
-# Used in: src.quantum_circuit.build_qnode (data embedding)
 def RY_layer(weights) -> None:
     """
     Apply a rotation around the Y axis for each qubit.
@@ -37,7 +35,6 @@ def RY_layer(weights) -> None:
         qml.RY(element, wires=idx)
 
 
-# Used in: src.quantum_circuit.build_qnode (entanglement)
 def entangling_layer(nqubits: int) -> None:
     """
     Apply alternating CNOT gates to entangle neighboring qubits.
@@ -51,7 +48,6 @@ def entangling_layer(nqubits: int) -> None:
         qml.CNOT(wires=[i, i + 1])
 
 
-# Used in: ants_bees.ipynb (hybrid head), crema-d*.ipynb (hybrid head)
 def build_qnode(n_qubits: int, q_depth: int, max_layers: int, dev) -> qml.QNode:
     """
     Construct a PennyLane QNode using simple RY entangling layers.
@@ -78,37 +74,6 @@ def build_qnode(n_qubits: int, q_depth: int, max_layers: int, dev) -> qml.QNode:
 
     return q_net
 
-
-def draw_qnode_circuit_example(n_qubits: int, q_depth: int, max_layers: Optional[int] = None, seed: int = 0):
-    """
-    Build and show a decomposed circuit diagram matching the BasicEntanglerLayers-based quantum head.
-
-    Args:
-        n_qubits: Number of qubits.
-        q_depth: Depth (number of entangler layers).
-        max_layers: Optional override for the number of parameter layers (defaults to q_depth).
-        seed: Seed for reproducible random weights.
-    """
-    max_layers = max_layers or q_depth
-    rng = np.random.default_rng(seed)
-    dev = qml.device("default.qubit", wires=n_qubits)
-
-    @qml.qnode(dev)
-    def qnode(inputs, weights):
-        qml.AngleEmbedding(inputs, wires=range(n_qubits))
-        qml.BasicEntanglerLayers(weights, wires=range(n_qubits))
-        return [qml.expval(qml.PauliZ(i)) for i in range(n_qubits)]
-
-    inputs = np.zeros((n_qubits,), dtype=np.float32)
-    weights = rng.standard_normal((q_depth, n_qubits))
-    try:
-        fig, _ = qml.draw_mpl(qnode, expansion_strategy="device")(inputs, weights)
-        plt.show()
-        return fig
-    except Exception:
-        diagram = qml.draw(qnode)(inputs, weights)
-        print(diagram)
-        return diagram
 
 
 def analyze_trained_quantum_head(
@@ -216,7 +181,6 @@ class BaseHybridHead(nn.Module):
         return self.post_net(q_out)
 
 
-# Used in: ants_bees.ipynb (hybrid head), crema-d*.ipynb (hybrid head)
 class Quantumnet(BaseHybridHead):
     """
     Hybrid quantum-classical head that wraps a PennyLane QNode.
@@ -226,7 +190,7 @@ class Quantumnet(BaseHybridHead):
         super().__init__(n_qubits, q_depth, max_layers, q_delta, dev, build_qnode, n_classes, base_model)
 
 
-# Used in: src.quantum_circuit.build_qnode2 (feature map)
+
 def zz_feature_map(x, nqubits: int, reps: int = 2) -> None:
     """
     Apply a ZZFeatureMap-style embedding with repeated layers.
@@ -245,7 +209,7 @@ def zz_feature_map(x, nqubits: int, reps: int = 2) -> None:
             qml.PhaseShift(2 * (np.pi - x[i]) * (np.pi - x[i + 1]), wires=i + 1)
 
 
-# Used in: src.quantum_circuit.build_qnode2 (variational block)
+
 def real_amplitudes_block(weights, nqubits: int) -> None:
     """
     Apply a RealAmplitudes-inspired rotation and entanglement block.
@@ -260,7 +224,6 @@ def real_amplitudes_block(weights, nqubits: int) -> None:
         qml.CNOT(wires=[i, i + 1])
 
 
-# Used in: crema-d-enhanced.ipynb (enhanced hybrid head), ants_bees.ipynb (hybrid head)
 def build_qnode2(n_qubits: int, q_depth: int, max_layers: int, dev) -> qml.QNode:
     """
     Construct a PennyLane QNode with ZZFeatureMap and RealAmplitudes-style layers.
@@ -286,7 +249,6 @@ def build_qnode2(n_qubits: int, q_depth: int, max_layers: int, dev) -> qml.QNode
     return q_net
 
 
-# Used in: crema-d-enhanced.ipynb (enhanced hybrid head)
 class DressedQuantumCircuit(BaseHybridHead):
     """
     Hybrid quantum-classical head using the enhanced QNode with feature maps.
@@ -294,8 +256,8 @@ class DressedQuantumCircuit(BaseHybridHead):
     def __init__(self, n_qubits: int, q_depth: int, max_layers: int, q_delta: float, dev, n_classes: int = 2,
                  base_model: str = "resnet18") -> None:
         super().__init__(n_qubits, q_depth, max_layers, q_delta, dev, build_qnode2, n_classes, base_model)
-    
-# Handy helper to visualize the qnode defined above (templated and decomposed views)
+
+
 def draw_qnode_circuit_example(
     n_qubits: int = 2,
     q_depth: int = 2,
